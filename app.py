@@ -334,14 +334,14 @@ Based on these results, compile and organize the REAL bearish narratives from ac
     }
 
 # ─── CLAUDE API ────────────────────────────────────────────────────────────────
-def call_claude(system: str, user_content: str) -> str:
+def call_claude(system: str, user_content: str, max_tokens: int = 4000) -> str:
     api_key = get_user_api_key()
     if not api_key:
         raise RuntimeError("로그인이 필요합니다.")
     client = anthropic.Anthropic(api_key=api_key)
     resp = client.messages.create(
         model="claude-sonnet-4-5-20250929",
-        max_tokens=4000,
+        max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user_content}],
     )
@@ -441,7 +441,7 @@ def run_analysis(target_id, target_label, market, stock, prompts):
             f"[{AGENT_LABELS[a]}]:\n{results.get(a,'')}"
             for a in ["bull","neutral","bear","bull_critic","neutral_critic","bear_critic"]
         ]) + "\n\n가장 그럴듯한 내러티브를 선정하고 근거를 제시하시오."
-        results["judge"] = call_claude(prompts["judge"], judge_input)
+        results["judge"] = call_claude(prompts["judge"], judge_input, max_tokens=8000)
     except Exception as e:
         results["judge"] = f"⚠️ 오류: {e}"
 
