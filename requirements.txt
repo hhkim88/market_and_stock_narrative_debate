@@ -2,3 +2,5 @@ streamlit>=1.35.0
 anthropic>=0.40.0
 supabase>=2.0.0
 tavily-python>=0.3.0
+exa-py>=1.1.0
+# FMP는 표준 urllib 사용 (별도 패키지 불필요)
