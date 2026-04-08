@@ -340,7 +340,7 @@ def call_claude(system: str, user_content: str) -> str:
         raise RuntimeError("로그인이 필요합니다.")
     client = anthropic.Anthropic(api_key=api_key)
     resp = client.messages.create(
-        model="claude-3-5-sonnet-20241022",
+        model="claude-3-7-sonnet-20250219",
         max_tokens=4000,
         system=system,
         messages=[{"role": "user", "content": user_content}],
