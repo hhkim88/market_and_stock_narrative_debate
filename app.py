@@ -213,12 +213,15 @@ def cache_get(target_id: str):
         return row
     except: return None
 
-def cache_set(target_id, market_id, target_label, results, winner):
+def cache_set(target_id, market_id, target_label, results, winner, bull_prob=50, neutral_prob=30, bear_prob=20):
     try:
         get_supabase().table("analyses").upsert({
             "target_id": target_id, "market_id": market_id,
             "target_label": target_label, "results": results,
             "winner": winner,
+            "bull_prob": bull_prob,
+            "neutral_prob": neutral_prob,
+            "bear_prob": bear_prob,
             "analyzed_at": datetime.now(timezone.utc).isoformat(),
         }, on_conflict="target_id").execute()
     except Exception as e:
@@ -231,14 +234,16 @@ def cache_delete(target_id):
 def load_leaderboard():
     try:
         resp = get_supabase().table("analyses").select(
-            "target_id,market_id,target_label,winner,analyzed_at"
-        ).order("analyzed_at", desc=True).execute()
+            "target_id,market_id,target_label,winner,bull_prob,neutral_prob,bear_prob,analyzed_at"
+        ).execute()
         rows = []
         for r in resp.data:
             at = datetime.fromisoformat(r["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
             age_h = (datetime.now(timezone.utc) - at).total_seconds() / 3600
             if age_h <= CACHE_TTL_HOURS:
                 rows.append({**r, "age_hours": round(age_h, 1)})
+        # 강세 확률 높은 순 → 동점 시 약세 확률 낮은 순 정렬
+        rows.sort(key=lambda r: (-(r.get("bull_prob") or 0), (r.get("bear_prob") or 0)))
         return rows
     except: return []
 
@@ -449,7 +454,11 @@ def run_analysis(target_id, target_label, market, stock, prompts):
     status.success("✅ 분석 완료!")
 
     winner = extract_winner(results.get("judge",""))
-    cache_set(target_id, market["id"], target_label, results, winner)
+    bull_p, neutral_p, bear_p = extract_probs(results.get("judge",""))
+    cache_set(
+        target_id, market["id"], target_label, results, winner,
+        bull_prob=bull_p or 50, neutral_prob=neutral_p or 30, bear_prob=bear_p or 20,
+    )
     return results, winner
 
 # ─── DISPLAY RESULTS ───────────────────────────────────────────────────────────
@@ -493,25 +502,80 @@ def display_results(results, winner, cached_at=None):
 # ─── LEADERBOARD ───────────────────────────────────────────────────────────────
 def display_leaderboard():
     rows  = load_leaderboard()
-    total = 3 + 20 * 3
+    total = 3 + 20 * 3  # 63
     done  = len(rows)
     pct   = int(done / total * 100)
-    st.markdown("### 📊 공유 분석 현황 (48시간 내)")
-    st.progress(pct/100, text=f"{done} / {total} 완료 ({pct}%) — 모든 사용자 공유")
+
+    st.markdown("### 📊 추천 강도 랭킹 (48시간 내 · 강세 확률 높은 순)")
+    st.progress(pct / 100, text=f"{done} / {total} 분석 완료 ({pct}%) — 모든 사용자 공유")
+
     if not rows:
         st.caption("아직 분석 없음. 첫 분석을 시작해보세요!")
         return
-    market_names = {"kospi200":"🇰🇷 KOSPI 200","sp500":"🇺🇸 S&P 500","nikkei225":"🇯🇵 닛케이 225"}
-    for mid in ["kospi200","sp500","nikkei225"]:
-        group = [r for r in rows if r["market_id"] == mid]
-        if not group: continue
-        with st.expander(f"{market_names[mid]} · {len(group)}개 완료", expanded=False):
-            for i, row in enumerate(group, 1):
-                c1,c2,c3,c4 = st.columns([0.5,2.5,1,1])
-                c1.markdown(f"`#{i}`")
-                c2.markdown(row["target_label"])
-                c3.markdown(winner_badge(row.get("winner","")))
-                c4.markdown(age_label(row["age_hours"]))
+
+    market_flag = {"kospi200":"🇰🇷","sp500":"🇺🇸","nikkei225":"🇯🇵"}
+
+    # 컬럼 헤더
+    h1,h2,h3,h4,h5,h6 = st.columns([0.4, 0.3, 2.2, 1.0, 2.5, 0.8])
+    h1.markdown("<span style='color:#444;font-size:11px'>순위</span>", unsafe_allow_html=True)
+    h2.markdown("<span style='color:#444;font-size:11px'>시장</span>", unsafe_allow_html=True)
+    h3.markdown("<span style='color:#444;font-size:11px'>종목/지수</span>", unsafe_allow_html=True)
+    h4.markdown("<span style='color:#444;font-size:11px'>판정</span>", unsafe_allow_html=True)
+    h5.markdown("<span style='color:#444;font-size:11px'>확률 분포</span>", unsafe_allow_html=True)
+    h6.markdown("<span style='color:#444;font-size:11px'>분석</span>", unsafe_allow_html=True)
+    st.markdown("<hr style='margin:4px 0; border-color:#1a1a2a'>", unsafe_allow_html=True)
+
+    for rank, row in enumerate(rows, 1):
+        bp = row.get("bull_prob") or 0
+        np_ = row.get("neutral_prob") or 0
+        rp = row.get("bear_prob") or 0
+        w  = row.get("winner","")
+        flag = market_flag.get(row.get("market_id",""), "")
+
+        # 순위 색상: 상위 강세 초록, 하위 약세 빨강
+        if bp >= 55:
+            rank_color = "#00e87a"
+        elif bp >= 45:
+            rank_color = "#f5c518"
+        else:
+            rank_color = "#ff3c4e"
+
+        c1,c2,c3,c4,c5,c6 = st.columns([0.4, 0.3, 2.2, 1.0, 2.5, 0.8])
+
+        c1.markdown(
+            f"<div style='color:{rank_color};font-weight:900;font-size:14px;padding-top:4px'>#{rank}</div>",
+            unsafe_allow_html=True,
+        )
+        c2.markdown(
+            f"<div style='font-size:18px;padding-top:2px'>{flag}</div>",
+            unsafe_allow_html=True,
+        )
+        c3.markdown(
+            f"<div style='color:#ccc;font-size:13px;padding-top:4px'>{row['target_label']}</div>",
+            unsafe_allow_html=True,
+        )
+        c4.markdown(winner_badge(w), unsafe_allow_html=False)
+
+        # 미니 확률 바
+        bar_html = f"""
+        <div style='display:flex;gap:2px;align-items:center;margin-top:6px'>
+          <div style='width:{bp}%;height:8px;background:#00e87a;border-radius:2px 0 0 2px' title='강세 {bp}%'></div>
+          <div style='width:{np_}%;height:8px;background:#f5c518' title='중립 {np_}%'></div>
+          <div style='width:{rp}%;height:8px;background:#ff3c4e;border-radius:0 2px 2px 0' title='약세 {rp}%'></div>
+        </div>
+        <div style='display:flex;gap:8px;font-size:9px;color:#555;margin-top:2px'>
+          <span style='color:#00e87a'>↑{bp}%</span>
+          <span style='color:#f5c518'>→{np_}%</span>
+          <span style='color:#ff3c4e'>↓{rp}%</span>
+        </div>"""
+        c5.markdown(bar_html, unsafe_allow_html=True)
+
+        c6.markdown(
+            f"<div style='color:#333;font-size:10px;padding-top:6px'>{age_label(row['age_hours'])}</div>",
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("<hr style='margin:2px 0; border-color:#0d0d0d'>", unsafe_allow_html=True)
 
 # ─── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
