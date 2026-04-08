@@ -452,72 +452,188 @@ def _detect_platform(url: str) -> str:
     if "kabutan" in url:      return "株探"
     return "커뮤니티"
 
-# ─── FMP: 어닝콜 트랜스크립트 ─────────────────────────────────────────────────
-def fetch_earnings_transcript(ticker_raw: str) -> str:
+# ─── 어닝콜 / 실적발표 정보 수집 ─────────────────────────────────────────────
+def fetch_earnings_transcript(ticker_raw: str, target_name: str = "", market_id: str = "sp500") -> str:
     """
-    Financial Modeling Prep API로 최신 어닝콜 트랜스크립트 수집.
-    FMP 무료플랜 기준 엔드포인트: /api/v3/earning_call_transcript/{symbol}
+    시장별 최적 전략으로 최신 실적발표·어닝콜 내용 수집.
+
+    한국(KOSPI): Tavily로 한국 경제지 실적 보도 검색
+      → 한경·매경·이데일리 등이 컨퍼런스콜 내용을 상세 보도
+    일본(Nikkei): Tavily로 일본어 決算 뉴스 검색
+    미국(S&P500): FMP API 먼저 시도 → 실패 시 Tavily fallback
     """
+    now = datetime.now()
+    yr  = now.year
+    # 최근 분기 추정
+    q_current = (now.month - 1) // 3 + 1
+    q_prev    = q_current - 1 if q_current > 1 else 4
+    yr_prev   = yr if q_current > 1 else yr - 1
+
+    # ── 한국 종목: Tavily로 실적 뉴스 검색 ──────────────────────────────────
+    if market_id == "kospi200":
+        return _fetch_earnings_tavily_kr(target_name, ticker_raw, yr, q_current, q_prev)
+
+    # ── 일본 종목: Tavily로 決算 뉴스 검색 ──────────────────────────────────
+    if market_id == "nikkei225":
+        return _fetch_earnings_tavily_jp(target_name, ticker_raw, yr)
+
+    # ── 미국 종목: FMP 먼저, 실패 시 Tavily fallback ─────────────────────────
+    fmp_key = st.secrets.get("FMP_API_KEY", "")
+    if fmp_key and fmp_key.strip() not in ("", "...", "여기에_FMP_키"):
+        fmp_result = _fetch_fmp(ticker_raw, fmp_key, yr, yr - 1)
+        if fmp_result:
+            return fmp_result
+    # FMP 실패 또는 키 없음 → Tavily fallback
+    return _fetch_earnings_tavily_us(target_name, ticker_raw, yr, q_current, q_prev)
+
+
+def _fetch_earnings_tavily_kr(name: str, ticker: str, yr: int, q: int, q_prev: int) -> str:
+    """한국 종목 실적발표·컨퍼런스콜 뉴스 Tavily 검색"""
+    client = get_tavily()
+    queries = [
+        f"{name} {yr}년 {q}분기 실적발표 컨퍼런스콜 경영진 가이던스",
+        f"{name} 실적 영업이익 매출 전망 경영진 발언 {yr}",
+        f"{ticker} {name} 어닝콜 CEO CFO 발언 {yr}년",
+    ]
+    snippets = []
+    seen = set()
+    for query in queries:
+        try:
+            resp = client.search(
+                query, max_results=4, search_depth="advanced",
+                include_domains=["hankyung.com","mk.co.kr","edaily.co.kr",
+                                 "thebell.co.kr","newsway.co.kr","inews24.com",
+                                 "sedaily.com","etnews.com","biz.chosun.com"],
+            )
+            for r in resp.get("results", []):
+                url = r.get("url","")
+                if url in seen: continue
+                seen.add(url)
+                snippets.append(
+                    f"■ {r.get('title','')} ({r.get('published_date','')[:10]})\n"
+                    f"  출처: {url}\n"
+                    f"  {r.get('content','')[:500]}"
+                )
+        except: pass
+    if not snippets:
+        return f"[{name} 실적발표 뉴스 검색 결과 없음 — 아직 발표 전일 수 있음]"
+    return (
+        f"【{name} 최신 실적발표 및 컨퍼런스콜 내용 (Tavily 검색)】\n"
+        f"(출처: 한국경제·매일경제·이데일리 등 경제지)\n\n"
+        + "\n\n".join(snippets[:6])
+    )
+
+
+def _fetch_earnings_tavily_jp(name: str, ticker: str, yr: int) -> str:
+    """일본 종목 決算 뉴스 Tavily 검색"""
+    client = get_tavily()
+    queries = [
+        f"{name} {yr}年 決算発表 業績 経営者コメント 見通し",
+        f"{ticker} {name} 決算 売上 営業利益 ガイダンス {yr}",
+    ]
+    snippets = []
+    seen = set()
+    for query in queries:
+        try:
+            resp = client.search(
+                query, max_results=4, search_depth="advanced",
+                include_domains=["nikkei.com","minkabu.jp","kabutan.jp",
+                                 "toyokeizai.net","diamond.jp","reuters.com"],
+            )
+            for r in resp.get("results", []):
+                url = r.get("url","")
+                if url in seen: continue
+                seen.add(url)
+                snippets.append(
+                    f"■ {r.get('title','')} ({r.get('published_date','')[:10]})\n"
+                    f"  출처: {url}\n"
+                    f"  {r.get('content','')[:500]}"
+                )
+        except: pass
+    if not snippets:
+        return f"[{name} 決算 뉴스 검색 결과 없음]"
+    return (
+        f"【{name} 最新決算発表・経営者コメント (Tavily検索)】\n\n"
+        + "\n\n".join(snippets[:5])
+    )
+
+
+def _fetch_earnings_tavily_us(name: str, ticker: str, yr: int, q: int, q_prev: int) -> str:
+    """미국 종목 어닝콜 뉴스 Tavily fallback"""
+    client = get_tavily()
+    queries = [
+        f"{name} {ticker} earnings call Q{q_prev} {yr} CEO CFO guidance transcript",
+        f"{ticker} quarterly earnings results management commentary {yr}",
+    ]
+    snippets = []
+    seen = set()
+    for query in queries:
+        try:
+            resp = client.search(
+                query, max_results=4, search_depth="advanced",
+                include_domains=["seekingalpha.com","fool.com","cnbc.com",
+                                 "reuters.com","bloomberg.com","wsj.com",
+                                 "marketwatch.com","thestreet.com"],
+            )
+            for r in resp.get("results", []):
+                url = r.get("url","")
+                if url in seen: continue
+                seen.add(url)
+                snippets.append(
+                    f"■ {r.get('title','')} ({r.get('published_date','')[:10]})\n"
+                    f"  출처: {url}\n"
+                    f"  {r.get('content','')[:500]}"
+                )
+        except: pass
+    if not snippets:
+        return f"[{name}({ticker}) 어닝콜 뉴스 검색 결과 없음]"
+    return (
+        f"【{name} 최신 어닝콜·실적발표 내용 (Tavily 검색)】\n"
+        f"(출처: Seeking Alpha·Reuters·Bloomberg 등)\n\n"
+        + "\n\n".join(snippets[:5])
+    )
+
+
+def _sanitize_fmp_ticker(ticker: str) -> str:
+    """FMP API용 티커 정규화. BRK.B → BRK-B, BF.B → BF-B 등"""
+    return ticker.replace(".", "-")
+
+def _fetch_fmp(ticker: str, fmp_key: str, yr: int, yr_prev: int):
+    """FMP API로 미국 종목 어닝콜 트랜스크립트 직접 수집. 실패 시 None 반환 (조용히)."""
     import urllib.request, urllib.error, json as _json
 
-    fmp_key = st.secrets.get("FMP_API_KEY", "")
-    if not fmp_key or fmp_key.strip() in ("", "...", "여기에_FMP_키"):
-        return "[FMP API 키 미설정 — financialmodelingprep.com에서 무료 발급 후 Secrets에 추가하세요]"
+    fmp_ticker = _sanitize_fmp_ticker(ticker)   # BRK.B → BRK-B
+    found = None
 
-    # 티커 변환 (한국 .KS / 일본 .T 는 FMP 무료플랜 미지원)
-    ticker = FMP_TICKER_MAP.get(ticker_raw, ticker_raw)
-    if ticker.endswith(".KS") or ticker.endswith(".T"):
-        return f"[한국·일본 종목({ticker})은 FMP 무료플랜에서 어닝콜 미지원 — 미국 종목(S&P 500)에서 활용 가능]"
+    for y in [yr, yr_prev]:
+        for q in [4, 3, 2, 1]:
+            url = (
+                f"https://financialmodelingprep.com/api/v3/earning_call_transcript"
+                f"/{fmp_ticker}?quarter={q}&year={y}&apikey={fmp_key}"
+            )
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=8) as r:
+                    data = _json.loads(r.read())
+                if data and isinstance(data, list) and data[0].get("content"):
+                    found = (data[0], q, y)
+                    break
+            except:
+                continue   # 403, timeout, parse error 모두 조용히 넘어감
+        if found:
+            break
 
-    try:
-        # 최신 트랜스크립트 직접 조회 (연도·분기 자동 탐색)
-        now = datetime.now()
-        found = None
-        for yr in [now.year, now.year - 1]:
-            for q in [4, 3, 2, 1]:
-                url = (
-                    f"https://financialmodelingprep.com/api/v3/earning_call_transcript"
-                    f"/{ticker}?quarter={q}&year={yr}&apikey={fmp_key}"
-                )
-                try:
-                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                    with urllib.request.urlopen(req, timeout=8) as r:
-                        data = _json.loads(r.read())
-                    if data and data[0].get("content"):
-                        found = (data[0], q, yr)
-                        break
-                except urllib.error.HTTPError as he:
-                    if he.code == 403:
-                        return (
-                            f"[FMP 403 오류: API 키 권한 부족.\n"
-                            f"해결법: financialmodelingprep.com → 로그인 → Dashboard에서 키 확인\n"
-                            f"무료플랜은 하루 250 요청, 어닝콜 트랜스크립트 지원]"
-                        )
-                    continue
-                except: continue
-            if found: break
+    if not found:
+        return None   # Tavily fallback으로 위임
 
-        if not found:
-            return f"[{ticker}: 최근 어닝콜 트랜스크립트를 찾을 수 없음 — 아직 발표 전이거나 FMP 미지원 종목]"
-
-        row, q, yr = found
-        transcript_text = row.get("content", "")
-        date_str = row.get("date", "")
-
-        # 핵심 섹션 추출: CEO/CFO 발언·가이던스 위주로 앞뒤 발췌
-        if len(transcript_text) > 6000:
-            excerpt = transcript_text[:3500] + "\n\n[... 중략 ...]\n\n" + transcript_text[-2000:]
-        else:
-            excerpt = transcript_text
-
-        return (
-            f"【어닝콜 트랜스크립트: {ticker} Q{q} {yr} ({date_str[:10]})】\n"
-            f"(출처: Financial Modeling Prep API)\n\n"
-            f"{excerpt}"
-        )
-
-    except Exception as e:
-        return f"[어닝콜 수집 중 예외 발생: {ticker} — {str(e)[:150]}]"
+    row, q, y = found
+    text = row.get("content", "")
+    if len(text) > 6000:
+        text = text[:3500] + "\n\n[... 중략 ...]\n\n" + text[-2000:]
+    return (
+        f"【어닝콜 트랜스크립트: {fmp_ticker} Q{q} {y} ({row.get('date','')[:10]})】\n"
+        f"(출처: Financial Modeling Prep)\n\n{text}"
+    )
 
 # ─── COMBINED SEARCH ───────────────────────────────────────────────────────────
 def combined_search(
@@ -540,7 +656,10 @@ def combined_search(
     tavily_res  = search_tavily(queries["tavily"])
     report_res  = search_exa_reports(queries["exa_report"])
     sns_res     = search_tavily_sns(queries["exa_sns"], market_id=market_id)
-    earnings_tx = fetch_earnings_transcript(ticker_raw) if ticker_raw else "[지수 분석 — 어닝콜 해당 없음]"
+    earnings_tx = (
+        fetch_earnings_transcript(ticker_raw, target_name=target, market_id=market_id)
+        if ticker_raw else "[지수 분석 — 어닝콜 해당 없음]"
+    )
 
     def fmt_items(items: list[dict], label: str, show_platform: bool = False) -> str:
         if not items:
