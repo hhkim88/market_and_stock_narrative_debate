@@ -1,9 +1,10 @@
 import streamlit as st
 import anthropic
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from supabase import create_client
 from tavily import TavilyClient
+from exa_py import Exa
 
 # ─── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="시장 방향 판정 엔진", page_icon="⚡", layout="wide")
@@ -101,44 +102,339 @@ AGENT_LABELS = {
     "judge":"⚡ 최종 판정자",
 }
 
-# ─── WEB SEARCH (Tavily) ──────────────────────────────────────────────────────
+# ─── SEARCH CLIENTS ────────────────────────────────────────────────────────────
 @st.cache_resource
 def get_tavily():
     return TavilyClient(api_key=st.secrets["TAVILY_API_KEY"])
 
-def web_search(queries: list[str]) -> str:
-    """Tavily로 복수 쿼리 검색 후 결과를 하나의 텍스트로 합산"""
-    client = get_tavily()
-    all_results = []
-    for query in queries:
-        try:
-            resp = client.search(query, max_results=4, search_depth="advanced")
-            for r in resp.get("results", []):
-                title   = r.get("title", "")
-                url     = r.get("url", "")
-                content = r.get("content", "")[:600]
-                all_results.append(f"■ {title}\n출처: {url}\n{content}")
-        except Exception as e:
-            all_results.append(f"[검색 실패: {query} — {e}]")
-    return "\n\n---\n\n".join(all_results)
+@st.cache_resource
+def get_exa():
+    return Exa(api_key=st.secrets["EXA_API_KEY"])
 
-def build_search_queries(target: str, direction: str, market_index: str) -> list[str]:
-    year = datetime.now().year
+# ─── DOMAIN LISTS ──────────────────────────────────────────────────────────────
+EXA_FINANCIAL_DOMAINS = [
+    "bloomberg.com", "ft.com", "reuters.com", "wsj.com",
+    "seekingalpha.com", "barrons.com", "marketwatch.com",
+    "cnbc.com", "economist.com", "morningstar.com",
+    "investopedia.com", "fool.com", "zacks.com",
+    "hankyung.com", "mk.co.kr", "edaily.co.kr", "thebell.co.kr",
+    "fnguide.com", "investing.com",
+    "nikkei.com", "toyokeizai.net",
+]
+
+EXA_SNS_DOMAINS = [
+    # 영문 투자 커뮤니티
+    "reddit.com",
+    "stocktwits.com",
+    "x.com", "twitter.com",
+    "news.ycombinator.com",
+    "fool.com/community",
+    # 한국 투자 커뮤니티
+    "finance.naver.com",
+    "stock.kakao.com",
+    "ppomppu.co.kr",
+    "clien.net",
+    "mlbpark.donga.com",
+    "fmkorea.com",
+    # 일본 투자 커뮤니티
+    "minkabu.jp",
+    "kabutan.jp",
+    "stockvoice.jp",
+]
+
+# ─── TICKER MAPPING (FMP용: 종목코드 → 영문 티커) ─────────────────────────────
+# FMP는 미국 티커 기준. 한국·일본은 종목코드.XXX 형식 사용
+FMP_TICKER_MAP = {
+    # KOSPI — FMP는 한국 종목 지원 제한적, 005930.KS 등으로 시도
+    "005930": "005930.KS",  "000660": "000660.KS",  "035420": "035420.KS",
+    "005380": "005380.KS",  "000270": "000270.KS",  "207940": "207940.KS",
+    "035720": "035720.KS",  "051910": "051910.KS",  "068270": "068270.KS",
+    "105560": "105560.KS",  "055550": "055550.KS",  "032830": "032830.KS",
+    "012330": "012330.KS",  "003550": "003550.KS",  "066570": "066570.KS",
+    "028260": "028260.KS",  "096770": "096770.KS",  "034730": "034730.KS",
+    "003490": "003490.KS",  "009830": "009830.KS",
+    # Nikkei — FMP는 7203.T 형식 지원
+    "7203": "7203.T",  "6758": "6758.T",  "9984": "9984.T",  "8306": "8306.T",
+    "6861": "6861.T",  "6367": "6367.T",  "4063": "4063.T",  "7974": "7974.T",
+    "6501": "6501.T",  "6702": "6702.T",  "8035": "8035.T",  "7267": "7267.T",
+    "2914": "2914.T",  "9432": "9432.T",  "8411": "8411.T",  "4502": "4502.T",
+    "6971": "6971.T",  "7751": "7751.T",  "6954": "6954.T",  "3382": "3382.T",
+}
+
+# ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
+def build_queries(target: str, direction: str, market_index: str, sector: str = "") -> dict:
+    now    = datetime.now()
+    year   = now.year
+    month  = now.strftime("%B %Y")
+    sector_note = f" {sector}" if sector else ""
+
     if direction == "bull":
-        return [
-            f"{target} {market_index} bull case buy recommendation analyst target price {year}",
-            f"{target} upside forecast earnings growth positive outlook {year}",
+        tavily_q = [
+            f"{target} stock buy rating target price upgrade analyst {month}",
+            f"{target}{sector_note} earnings beat revenue growth bullish outlook {year}",
+            f"{market_index} bull market rally forecast {month}",
+        ]
+        exa_report_q = [
+            f"Investment research report bullish case for {target} price target upside",
+            f"Expert analysis why {target} stock will outperform in {year}",
+            f"{target}{sector_note} undervalued catalyst growth story analyst recommendation",
+        ]
+        exa_sns_q = [
+            f"{target} stock bullish investors excited positive sentiment Reddit StockTwits",
+            f"Why I'm buying {target} stock community discussion {year}",
         ]
     elif direction == "neutral":
-        return [
-            f"{target} {market_index} neutral hold sideways range-bound forecast {year}",
-            f"{target} mixed outlook uncertainty analyst cautious {year}",
+        tavily_q = [
+            f"{target} stock hold neutral rating mixed outlook analyst {month}",
+            f"{target} sideways range-bound consolidation uncertainty {year}",
+            f"{market_index} flat market uncertainty {month}",
         ]
-    else:
-        return [
-            f"{target} {market_index} bear case sell recommendation downside risk {year}",
-            f"{target} correction warning negative outlook analyst {year}",
+        exa_report_q = [
+            f"Why {target} stock is fairly valued neutral outlook balanced risks",
+            f"{target}{sector_note} wait and see cautious analyst note {year}",
+            f"{market_index} range-bound sideways market analysis competing forces",
         ]
+        exa_sns_q = [
+            f"{target} stock mixed opinion community debate uncertain Reddit {year}",
+            f"Is {target} worth holding investors discussion {month}",
+        ]
+    else:  # bear
+        tavily_q = [
+            f"{target} stock sell downgrade target price cut analyst {month}",
+            f"{target}{sector_note} earnings miss revenue decline bearish risk {year}",
+            f"{market_index} market correction crash risk warning {month}",
+        ]
+        exa_report_q = [
+            f"Investment research bearish case short thesis {target} downside risk",
+            f"Expert column why {target} stock is overvalued or facing headwinds {year}",
+            f"{target}{sector_note} structural decline competition disruption analysis",
+        ]
+        exa_sns_q = [
+            f"{target} stock bearish investors worried concern Reddit StockTwits {year}",
+            f"Why I sold {target} stock community discussion risk {month}",
+        ]
+
+    return {
+        "tavily":      tavily_q,
+        "exa_report":  exa_report_q,
+        "exa_sns":     exa_sns_q,
+    }
+
+# ─── TAVILY SEARCH ─────────────────────────────────────────────────────────────
+def search_tavily(queries: list[str]) -> list[dict]:
+    client = get_tavily()
+    seen, results = set(), []
+    for query in queries:
+        try:
+            resp = client.search(query, max_results=4, search_depth="advanced", include_answer=False)
+            for r in resp.get("results", []):
+                url = r.get("url", "")
+                if url in seen: continue
+                seen.add(url)
+                results.append({
+                    "title":   r.get("title", ""),
+                    "url":     url,
+                    "content": r.get("content", "")[:700],
+                    "date":    r.get("published_date", ""),
+                })
+        except Exception as e:
+            results.append({"title": f"검색 실패: {query}", "url": "", "content": str(e)[:100], "date": ""})
+    return results
+
+# ─── EXA: 금융 리포트·칼럼 ─────────────────────────────────────────────────────
+def search_exa_reports(queries: list[str], recent_days: int = 90) -> list[dict]:
+    client = get_exa()
+    start  = (datetime.now() - timedelta(days=recent_days)).strftime("%Y-%m-%dT00:00:00.000Z")
+    seen, results = set(), []
+    for query in queries:
+        try:
+            resp = client.search_and_contents(
+                query, num_results=4, use_autoprompt=True,
+                text={"max_characters": 800},
+                highlights={"num_sentences": 3, "highlights_per_url": 2},
+                start_published_date=start,
+                include_domains=EXA_FINANCIAL_DOMAINS,
+            )
+            for r in resp.results:
+                url = r.url or ""
+                if url in seen: continue
+                seen.add(url)
+                hl = getattr(r, "highlights", []) or []
+                content = " … ".join(hl) if hl else (getattr(r, "text", "") or "")[:800]
+                results.append({
+                    "title":   r.title or "",
+                    "url":     url,
+                    "content": content[:800],
+                    "date":    r.published_date or "",
+                })
+        except Exception as e:
+            results.append({"title": f"리포트 검색 실패: {query}", "url": "", "content": str(e)[:100], "date": ""})
+    return results
+
+# ─── EXA: SNS·커뮤니티 여론 ──────────────────────────────────────────────────
+def search_exa_sns(queries: list[str], recent_days: int = 60) -> list[dict]:
+    """
+    Reddit·StockTwits·X·네이버 금융 등 커뮤니티의 Raw 여론 수집.
+    필터링 없는 투자자 감성을 그대로 반영.
+    """
+    client = get_exa()
+    start  = (datetime.now() - timedelta(days=recent_days)).strftime("%Y-%m-%dT00:00:00.000Z")
+    seen, results = set(), []
+    for query in queries:
+        try:
+            resp = client.search_and_contents(
+                query, num_results=5, use_autoprompt=True,
+                text={"max_characters": 600},
+                highlights={"num_sentences": 2, "highlights_per_url": 3},
+                start_published_date=start,
+                include_domains=EXA_SNS_DOMAINS,
+            )
+            for r in resp.results:
+                url = r.url or ""
+                if url in seen: continue
+                seen.add(url)
+                hl = getattr(r, "highlights", []) or []
+                content = " … ".join(hl) if hl else (getattr(r, "text", "") or "")[:600]
+                results.append({
+                    "title":   r.title or url,
+                    "url":     url,
+                    "content": content[:600],
+                    "date":    r.published_date or "",
+                    "platform": _detect_platform(url),
+                })
+        except Exception as e:
+            results.append({"title": f"SNS 검색 실패: {query}", "url": "", "content": str(e)[:100], "date": "", "platform": "?"})
+    return results
+
+def _detect_platform(url: str) -> str:
+    if "reddit.com" in url:   return "Reddit"
+    if "stocktwits.com" in url: return "StockTwits"
+    if "x.com" in url or "twitter.com" in url: return "X(Twitter)"
+    if "naver.com" in url:    return "네이버금융"
+    if "kakao.com" in url:    return "카카오"
+    if "minkabu" in url:      return "みんかぶ"
+    if "kabutan" in url:      return "株探"
+    return "커뮤니티"
+
+# ─── FMP: 어닝콜 트랜스크립트 ─────────────────────────────────────────────────
+def fetch_earnings_transcript(ticker_raw: str) -> str:
+    """
+    Financial Modeling Prep API로 최신 어닝콜 트랜스크립트 수집.
+    경영진의 실제 발언·가이던스를 직접 반영.
+    """
+    import urllib.request, json as _json
+
+    fmp_key = st.secrets.get("FMP_API_KEY", "")
+    if not fmp_key:
+        return "[FMP API 키 없음 — 어닝콜 데이터 미포함]"
+
+    # 티커 변환 (한국·일본 종목)
+    ticker = FMP_TICKER_MAP.get(ticker_raw, ticker_raw)
+
+    try:
+        # 최근 4개 분기 목록 조회
+        url_list = (
+            f"https://financialmodelingprep.com/api/v4/earning_call_transcript"
+            f"?symbol={ticker}&apikey={fmp_key}"
+        )
+        with urllib.request.urlopen(url_list, timeout=8) as r:
+            data = _json.loads(r.read())
+
+        if not data:
+            return f"[{ticker}: 어닝콜 트랜스크립트 없음 (FMP 미지원 종목일 수 있음)]"
+
+        # 가장 최신 분기
+        latest = data[0]
+        quarter, year_ec = latest.get("quarter", ""), latest.get("year", "")
+
+        # 트랜스크립트 본문 조회
+        url_transcript = (
+            f"https://financialmodelingprep.com/api/v3/earning_call_transcript"
+            f"/{ticker}?quarter={quarter}&year={year_ec}&apikey={fmp_key}"
+        )
+        with urllib.request.urlopen(url_transcript, timeout=10) as r:
+            t_data = _json.loads(r.read())
+
+        if not t_data:
+            return f"[{ticker} Q{quarter} {year_ec}: 트랜스크립트 본문 없음]"
+
+        transcript_text = t_data[0].get("content", "")
+        if not transcript_text:
+            return f"[{ticker}: 트랜스크립트 내용 비어 있음]"
+
+        # 핵심 섹션 추출 (너무 길면 앞 3,000자 + 뒤 1,000자)
+        if len(transcript_text) > 5000:
+            excerpt = transcript_text[:3000] + "\n\n[... 중략 ...]\n\n" + transcript_text[-1500:]
+        else:
+            excerpt = transcript_text
+
+        return (
+            f"【어닝콜 트랜스크립트: {ticker} Q{quarter} {year_ec}】\n"
+            f"(출처: Financial Modeling Prep)\n\n"
+            f"{excerpt}"
+        )
+
+    except Exception as e:
+        return f"[어닝콜 데이터 수집 실패: {ticker} — {str(e)[:120]}]"
+
+# ─── COMBINED SEARCH ───────────────────────────────────────────────────────────
+def combined_search(
+    target: str,
+    direction: str,
+    market_index: str,
+    sector: str = "",
+    ticker_raw: str = "",        # FMP용 원본 종목코드
+) -> str:
+    """
+    4개 소스 통합:
+    1) Tavily   — 최신 뉴스·속보·애널리스트 코멘트
+    2) Exa      — 금융 리포트·IB 분석·전문가 칼럼
+    3) Exa SNS  — Reddit·StockTwits·커뮤니티 Raw 여론
+    4) FMP      — 최신 어닝콜 트랜스크립트 (종목일 때만)
+    """
+    queries = build_queries(target, direction, market_index, sector)
+
+    tavily_res  = search_tavily(queries["tavily"])
+    report_res  = search_exa_reports(queries["exa_report"])
+    sns_res     = search_exa_sns(queries["exa_sns"])
+    earnings_tx = fetch_earnings_transcript(ticker_raw) if ticker_raw else "[지수 분석 — 어닝콜 해당 없음]"
+
+    def fmt_items(items: list[dict], label: str, show_platform: bool = False) -> str:
+        if not items:
+            return f"【{label}】\n결과 없음\n"
+        lines = [f"【{label}】"]
+        for r in items:
+            date_str = f" ({r['date'][:10]})" if r.get("date") else ""
+            platform = f"[{r.get('platform','')}] " if show_platform and r.get("platform") else ""
+            lines.append(f"■ {platform}{r['title']}{date_str}")
+            if r.get("url"):
+                lines.append(f"  출처: {r['url']}")
+            if r.get("content"):
+                lines.append(f"  내용: {r['content']}")
+            lines.append("")
+        return "\n".join(lines)
+
+    dir_ko  = "강세" if direction=="bull" else "중립" if direction=="neutral" else "약세"
+    total   = len(tavily_res) + len(report_res) + len(sns_res)
+    header  = (
+        f"=== {target} [{dir_ko}] 검색 결과 "
+        f"(총 {total}건, {datetime.now().strftime('%Y-%m-%d')}) ===\n"
+        f"소스: Tavily(뉴스) + Exa(리포트) + Exa(SNS여론) + FMP(어닝콜)\n"
+    )
+
+    sections = [
+        fmt_items(tavily_res,  "① 최신 뉴스·애널리스트 코멘트 (Tavily)"),
+        fmt_items(report_res,  "② 금융 리포트·전문가 칼럼 (Exa)"),
+        fmt_items(sns_res,     "③ SNS·커뮤니티 Raw 여론 (Exa + Reddit/StockTwits/네이버)", show_platform=True),
+        f"④ 최신 어닝콜 트랜스크립트 (FMP)\n{earnings_tx}",
+    ]
+
+    return header + "\n\n".join(sections)
+
+def build_search_queries(target: str, direction: str, market_index: str) -> list[str]:
+    """하위 호환용"""
+    return build_queries(target, direction, market_index)["tavily"]
+
 
 # ─── LOGIN ─────────────────────────────────────────────────────────────────────
 def get_user_api_key() -> str | None:
@@ -256,35 +552,38 @@ def build_system_prompts(market: dict, stock: tuple = None):
     sector_note = f" (섹터: {stock[2]}, {idx} 상장)" if stock else ""
 
     return {
-        "bull": f"""You are a research analyst. You will receive recent web search results about {target}{sector_note}.
-Based on these results, compile and organize the REAL bullish narratives from actual analysts and institutions. {kr}
+        "bull": f"""You are a research analyst. You will receive results from 4 sources about {target}{sector_note}. {kr}
 ## 📈 {target} 강세 내러티브 수집 (향후 3개월)
 ### 주요 강세론자 및 기관 [실명·기관명·목표가 포함]
 ### 지배적인 강세 스토리라인 [누가, 왜, 어떤 근거로]
 ### 핵심 데이터 및 근거 [수치·지표 직접 인용]
+### SNS·커뮤니티 강세 여론 [Reddit·커뮤니티의 실제 분위기를 Raw하게 요약]
+### 어닝콜 핵심 포인트 [경영진 발언·가이던스 중 강세 근거]
 ### 강세 전제 조건
 ### 강세 내러티브 3줄 요약
-출처(기관명, 날짜, URL)를 반드시 명시하시오.""",
+출처(기관명, 날짜, URL, 커뮤니티명)를 반드시 명시하시오.""",
 
-        "neutral": f"""You are a research analyst. You will receive recent web search results about {target}{sector_note}.
-Based on these results, compile and organize the REAL neutral/sideways narratives from actual analysts. {kr}
+        "neutral": f"""You are a research analyst. You will receive results from 4 sources about {target}{sector_note}. {kr}
 ## ➡️ {target} 중립 내러티브 수집 (향후 3개월)
 ### 주요 중립론자 및 기관 [실명·기관명 포함]
 ### 지배적인 중립 스토리라인 [누가, 왜, 어떤 근거로]
 ### 핵심 데이터 및 근거 [상충 신호, 불확실성 지표]
+### SNS·커뮤니티 중립 여론 [관망·혼재된 의견의 실제 분위기]
+### 어닝콜 핵심 포인트 [경영진 발언 중 불확실성·중립 신호]
 ### 중립 전제 조건
 ### 중립 내러티브 3줄 요약
-출처(기관명, 날짜, URL)를 반드시 명시하시오.""",
+출처(기관명, 날짜, URL, 커뮤니티명)를 반드시 명시하시오.""",
 
-        "bear": f"""You are a research analyst. You will receive recent web search results about {target}{sector_note}.
-Based on these results, compile and organize the REAL bearish narratives from actual analysts and institutions. {kr}
+        "bear": f"""You are a research analyst. You will receive results from 4 sources about {target}{sector_note}. {kr}
 ## 📉 {target} 약세 내러티브 수집 (향후 3개월)
 ### 주요 약세론자 및 기관 [실명·기관명 포함]
 ### 지배적인 약세 스토리라인 [누가, 왜, 어떤 근거로]
 ### 핵심 데이터 및 근거 [리스크 지표, 경고 신호]
+### SNS·커뮤니티 약세 여론 [Reddit·커뮤니티의 우려·공포 분위기를 Raw하게 반영]
+### 어닝콜 핵심 포인트 [경영진 발언 중 리스크·약세 시그널]
 ### 약세 전제 조건
 ### 약세 내러티브 3줄 요약
-출처(기관명, 날짜, URL)를 반드시 명시하시오.""",
+출처(기관명, 날짜, URL, 커뮤니티명)를 반드시 명시하시오.""",
 
         "bull_critic": f"""You are an adversarial analyst stress-testing bullish narratives about {target}. {kr}
 ## 🔥 강세 내러티브 비판
@@ -384,29 +683,37 @@ def run_analysis(target_id, target_label, market, stock, prompts):
     status   = st.empty()
     target_short = stock[1] if stock else market["index"]
 
-    # ── Phase 1: 웹검색 → Claude 분석 ─────────────────────────────────────────
-    st.markdown("**Phase 1 · 내러티브 수집 (Tavily 웹검색 + Claude 분석)**")
+    # ── Phase 1: 듀얼 엔진 검색 → Claude 분석 ────────────────────────────────
+    st.markdown("**Phase 1 · 내러티브 수집 (Tavily 뉴스 + Exa 리포트·칼럼 → Claude 분석)**")
     cols = st.columns(3)
     areas = {a: cols[i].empty() for i, a in enumerate(["bull","neutral","bear"])}
 
+    sector     = stock[2] if stock else ""
+    ticker_raw = stock[0] if stock else ""
+
     for i, (agent, direction) in enumerate([("bull","bull"),("neutral","neutral"),("bear","bear")]):
-        status.markdown(f"🔍 **{AGENT_LABELS[agent]}** — 웹 검색 중...")
-        areas[agent].info(f"{AGENT_LABELS[agent]}\n🔍 Tavily 검색 중...")
+        dir_label = "강세" if direction=="bull" else ("중립" if direction=="neutral" else "약세")
+        status.markdown(f"🔍 **{AGENT_LABELS[agent]}** — 4-소스 검색 중...")
+        areas[agent].info(f"{AGENT_LABELS[agent]}\n🔍 Tavily+Exa+FMP 수집 중...")
 
         try:
-            # 1) 웹 검색
-            queries = build_search_queries(target_short, direction, market["index"])
-            search_results = web_search(queries)
+            search_results = combined_search(
+                target_short, direction, market["index"],
+                sector=sector, ticker_raw=ticker_raw,
+            )
 
-            # 2) 검색 결과를 Claude에게 전달
             areas[agent].info(f"{AGENT_LABELS[agent]}\n🤖 Claude 분석 중...")
             status.markdown(f"🤖 **{AGENT_LABELS[agent]}** — Claude 분석 중...")
 
-            user_content = f"""다음은 오늘({datetime.now().strftime('%Y년 %m월 %d일')}) 기준 {target_label}에 관한 최신 웹 검색 결과입니다:
+            user_content = f"""다음은 오늘({datetime.now().strftime('%Y년 %m월 %d일')}) 기준 {target_label}에 관한 4개 소스 검색 결과입니다:
 
 {search_results}
 
-위 검색 결과를 바탕으로, 실제 시장에서 {'상승' if direction=='bull' else ('보합' if direction=='neutral' else '하락')} 방향성을 주장하는 애널리스트와 기관의 내러티브를 수집·정리하십시오."""
+위 검색 결과를 바탕으로:
+- ①②: 기관·전문가의 공식 {dir_label} 내러티브를 수집·정리하십시오
+- ③: SNS·커뮤니티의 Raw 여론(감성·분위기)을 객관적으로 요약하십시오
+- ④: 어닝콜에서 경영진이 언급한 핵심 가이던스와 리스크를 반영하십시오
+구체적인 수치·날짜·출처·발언자를 반드시 인용하십시오."""
 
             results[agent] = call_claude(prompts[agent], user_content)
             areas[agent].success(f"{AGENT_LABELS[agent]}\n✅ 완료")
