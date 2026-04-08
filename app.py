@@ -111,22 +111,15 @@ def get_user_api_key() -> str | None:
     return st.session_state.get("user_api_key")
 
 def validate_api_key(key: str) -> tuple[bool, str]:
-    """API 키 유효성 검증 — 실제 API 호출로 확인"""
-    if not key or not key.startswith("sk-ant-"):
-        return False, "API 키는 'sk-ant-' 로 시작해야 합니다."
-    try:
-        client = anthropic.Anthropic(api_key=key)
-        # 최소한의 테스트 호출 (토큰 1개만 사용)
-        client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1,
-            messages=[{"role": "user", "content": "hi"}],
-        )
-        return True, "OK"
-    except anthropic.AuthenticationError:
-        return False, "유효하지 않은 API 키입니다. console.anthropic.com에서 확인해 주세요."
-    except Exception as e:
-        return False, f"연결 오류: {str(e)[:80]}"
+    """API 키 형식 검증 (형식만 확인 — 실제 호출 없음)"""
+    key = key.strip()
+    if not key:
+        return False, "API 키를 입력해 주세요."
+    if not key.startswith("sk-ant-"):
+        return False, "Anthropic API 키는 'sk-ant-'로 시작해야 합니다."
+    if len(key) < 40:
+        return False, "API 키가 너무 짧습니다. 전체 키를 복사했는지 확인해 주세요."
+    return True, "OK"
 
 def show_login_page():
     """API 키 입력 로그인 화면"""
