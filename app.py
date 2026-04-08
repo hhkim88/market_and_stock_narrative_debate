@@ -1,6 +1,5 @@
 import streamlit as st
 import anthropic
-import json
 import re
 from datetime import datetime, timezone
 from supabase import create_client
@@ -28,6 +27,10 @@ div[data-testid="stExpander"] > div { background: #09090f !important; }
 div[data-testid="metric-container"] {
     background: #0c0c18; border: 1px solid #1a1a2a;
     border-radius: 8px; padding: 12px;
+}
+.login-box {
+    max-width: 480px; margin: 60px auto; padding: 36px 40px;
+    background: #0c0c18; border: 1px solid #1a1a2a; border-radius: 12px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -101,6 +104,81 @@ AGENT_LABELS = {
     "judge":"⚡ 최종 판정자",
 }
 
+# ─── LOGIN / API KEY 관리 ──────────────────────────────────────────────────────
+
+def get_user_api_key() -> str | None:
+    """세션에서 사용자 API 키 반환"""
+    return st.session_state.get("user_api_key")
+
+def validate_api_key(key: str) -> tuple[bool, str]:
+    """API 키 유효성 검증 — 실제 API 호출로 확인"""
+    if not key or not key.startswith("sk-ant-"):
+        return False, "API 키는 'sk-ant-' 로 시작해야 합니다."
+    try:
+        client = anthropic.Anthropic(api_key=key)
+        # 최소한의 테스트 호출 (토큰 1개만 사용)
+        client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1,
+            messages=[{"role": "user", "content": "hi"}],
+        )
+        return True, "OK"
+    except anthropic.AuthenticationError:
+        return False, "유효하지 않은 API 키입니다. console.anthropic.com에서 확인해 주세요."
+    except Exception as e:
+        return False, f"연결 오류: {str(e)[:80]}"
+
+def show_login_page():
+    """API 키 입력 로그인 화면"""
+    st.markdown("""
+    <h1 style='text-align:center; background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; font-size:28px; margin-bottom:4px'>
+    ⚡ 시장 방향 판정 엔진</h1>
+    <p style='text-align:center; color:#444; font-size:12px; letter-spacing:2px; margin-bottom:40px'>
+    7-AGENT AI · 강세/중립/약세 내러티브 분석 · 향후 3개월 판정</p>
+    """, unsafe_allow_html=True)
+
+    # 로그인 박스
+    col_l, col_c, col_r = st.columns([1, 2, 1])
+    with col_c:
+        st.markdown("""
+        <div style='background:#0c0c18; border:1px solid #1a1a2a; border-radius:12px; padding:32px 36px;'>
+        <div style='color:#888; font-size:11px; letter-spacing:2px; margin-bottom:20px; text-align:center'>
+        🔑 ANTHROPIC API 키로 로그인</div>
+        """, unsafe_allow_html=True)
+
+        api_key = st.text_input(
+            "API 키",
+            type="password",
+            placeholder="sk-ant-api03-...",
+            label_visibility="collapsed",
+        )
+
+        if st.button("▶ 로그인 및 시작", type="primary", use_container_width=True):
+            if not api_key:
+                st.error("API 키를 입력해 주세요.")
+            else:
+                with st.spinner("API 키 확인 중..."):
+                    valid, msg = validate_api_key(api_key.strip())
+                if valid:
+                    st.session_state["user_api_key"] = api_key.strip()
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("""
+        <div style='margin-top:24px; color:#333; font-size:11px; line-height:1.8; text-align:center'>
+        API 키가 없으신가요?<br>
+        <a href='https://console.anthropic.com/settings/keys' target='_blank'
+           style='color:#4fc3f7'>console.anthropic.com</a> 에서 무료 발급<br><br>
+        ✅ API 키는 이 서버에 저장되지 않습니다<br>
+        ✅ 세션 종료 시 자동 삭제됩니다<br>
+        ✅ 분석 결과는 모든 사용자와 공유됩니다
+        </div>
+        """, unsafe_allow_html=True)
+
 # ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
 @st.cache_resource
 def get_supabase():
@@ -108,7 +186,6 @@ def get_supabase():
 
 # ─── CACHE HELPERS ─────────────────────────────────────────────────────────────
 def cache_get(target_id: str):
-    """48시간 내 캐시된 분석 결과 읽기"""
     try:
         sb = get_supabase()
         resp = sb.table("analyses").select("*").eq("target_id", target_id).execute()
@@ -124,8 +201,7 @@ def cache_get(target_id: str):
         st.warning(f"캐시 읽기 오류: {e}")
         return None
 
-def cache_set(target_id: str, market_id: str, target_label: str, results: dict, winner: str):
-    """분석 결과를 Supabase에 저장 (공유)"""
+def cache_set(target_id, market_id, target_label, results, winner):
     try:
         sb = get_supabase()
         payload = {
@@ -140,17 +216,17 @@ def cache_set(target_id: str, market_id: str, target_label: str, results: dict, 
     except Exception as e:
         st.warning(f"캐시 저장 오류: {e}")
 
-def cache_delete(target_id: str):
+def cache_delete(target_id):
     try:
-        sb = get_supabase()
-        sb.table("analyses").delete().eq("target_id", target_id).execute()
+        get_supabase().table("analyses").delete().eq("target_id", target_id).execute()
     except: pass
 
 def load_leaderboard():
-    """48시간 내 모든 분석 결과 로드 (공유)"""
     try:
         sb = get_supabase()
-        resp = sb.table("analyses").select("target_id,market_id,target_label,winner,analyzed_at").order("analyzed_at", desc=True).execute()
+        resp = sb.table("analyses").select(
+            "target_id,market_id,target_label,winner,analyzed_at"
+        ).order("analyzed_at", desc=True).execute()
         rows = []
         for r in resp.data:
             analyzed_at = datetime.fromisoformat(r["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
@@ -162,7 +238,7 @@ def load_leaderboard():
         return []
 
 # ─── PROMPT BUILDERS ───────────────────────────────────────────────────────────
-def build_prompts(market: dict, stock: tuple = None):
+def build_prompts(market, stock=None):
     idx = market["index"]
     cb  = market["central_bank"]
     kr  = "**CRITICAL: Write your ENTIRE response in Korean (한국어).**"
@@ -170,69 +246,79 @@ def build_prompts(market: dict, stock: tuple = None):
     if stock:
         ticker, name, sector = stock
         target = f"{name} ({ticker})"
-        scope  = f"{target} 주가 (섹터: {sector}, {market['index']} 상장)"
+        scope  = f"{target} 주가 (섹터: {sector}, {idx} 상장)"
     else:
         target = idx
         scope  = f"{idx} 지수"
 
-    bull_sys = f"""You are a research analyst curating REAL bullish narratives about {scope} over the next 3 months.
-⚠️ You are a reporter—find what actual analysts/institutions are saying. {kr}
+    def analyst(direction, ko_direction):
+        return f"""You are a research analyst curating REAL {direction} narratives about {scope} over the next 3 months.
+⚠️ You are a reporter—find what actual analysts/institutions are saying RIGHT NOW. {kr}
 
+## {ko_direction} {target} {'강세' if direction=='bullish' else ('중립' if direction=='neutral' else '약세')} 내러티브 수집 (향후 3개월)
+### 주요 {'강세' if 'bull' in direction else ('중립' if 'neutral' in direction else '약세')}론자 및 기관 [실명·기관명·목표가 포함]
+### 지배적인 {'강세' if 'bull' in direction else ('중립' if 'neutral' in direction else '약세')} 스토리라인 [누가, 왜, 어떤 근거로]
+### 핵심 데이터 및 근거 [수치·지표 인용]
+### {'강세' if 'bull' in direction else ('중립' if 'neutral' in direction else '약세')} 전제 조건
+### {'강세' if 'bull' in direction else ('중립' if 'neutral' in direction else '약세')} 내러티브 3줄 요약
+출처(기관명, 날짜)를 반드시 명시하시오."""
+
+    return {
+        "bull": f"""You are a research analyst curating REAL bullish narratives about {scope} over 3 months.
+⚠️ Reporter only—find what actual analysts say. {kr}
 ## 📈 {target} 강세 내러티브 수집 (향후 3개월)
 ### 주요 강세론자 및 기관 [실명·기관명·목표가 포함]
 ### 지배적인 강세 스토리라인 [누가, 왜, 어떤 근거로]
 ### 핵심 데이터 및 근거 [수치·지표 인용]
 ### 강세 전제 조건
 ### 강세 내러티브 3줄 요약
-출처(기관명, 날짜)를 명시하시오."""
+출처(기관명, 날짜)를 반드시 명시하시오.""",
 
-    neutral_sys = f"""You are a research analyst curating REAL neutral/sideways narratives about {scope} over the next 3 months.
-⚠️ You are a reporter—find what actual analysts/institutions are saying. {kr}
-
+        "neutral": f"""You are a research analyst curating REAL neutral/sideways narratives about {scope} over 3 months.
+⚠️ Reporter only—find what actual analysts say. {kr}
 ## ➡️ {target} 중립 내러티브 수집 (향후 3개월)
 ### 주요 중립론자 및 기관 [실명·기관명 포함]
 ### 지배적인 중립 스토리라인 [누가, 왜, 어떤 근거로]
 ### 핵심 데이터 및 근거 [상충 신호, 불확실성]
 ### 중립 전제 조건
 ### 중립 내러티브 3줄 요약
-출처(기관명, 날짜)를 명시하시오."""
+출처(기관명, 날짜)를 반드시 명시하시오.""",
 
-    bear_sys = f"""You are a research analyst curating REAL bearish narratives about {scope} over the next 3 months.
-⚠️ You are a reporter—find what actual analysts/institutions are saying. {kr}
-
+        "bear": f"""You are a research analyst curating REAL bearish narratives about {scope} over 3 months.
+⚠️ Reporter only—find what actual analysts say. {kr}
 ## 📉 {target} 약세 내러티브 수집 (향후 3개월)
 ### 주요 약세론자 및 기관 [실명·기관명 포함]
 ### 지배적인 약세 스토리라인 [누가, 왜, 어떤 근거로]
 ### 핵심 데이터 및 근거 [리스크 지표, 경고 신호]
 ### 약세 전제 조건
 ### 약세 내러티브 3줄 요약
-출처(기관명, 날짜)를 명시하시오."""
+출처(기관명, 날짜)를 반드시 명시하시오.""",
 
-    bull_critic_sys = f"""You are an adversarial analyst stress-testing bullish narratives about {target}. {kr}
+        "bull_critic": f"""You are an adversarial analyst stress-testing bullish narratives about {target}. {kr}
 ## 🔥 강세 내러티브 비판
 ### 근거의 취약점 [데이터 오독, 체리피킹]
 ### 강세가 외면한 반대 증거
-### 논리적 허점 [인과관계 붕괴 지점]
+### 논리적 허점
 ### 향후 3개월 강세 붕괴 리스크
-### 강세 신뢰도 [1-10점 및 2줄 평가]"""
+### 강세 신뢰도 [1-10점 및 2줄 평가]""",
 
-    neutral_critic_sys = f"""You are an adversarial analyst stress-testing neutral narratives about {target}. {kr}
+        "neutral_critic": f"""You are an adversarial analyst stress-testing neutral narratives about {target}. {kr}
 ## 🔥 중립 내러티브 비판
-### 거짓 균형의 함정 [실제로 더 강한 쪽은?]
+### 거짓 균형의 함정
 ### 중립이 외면한 방향성 신호
 ### 역사적 실패 사례
 ### 방향성 강제 촉매
-### 중립 신뢰도 [1-10점 및 2줄 평가]"""
+### 중립 신뢰도 [1-10점 및 2줄 평가]""",
 
-    bear_critic_sys = f"""You are an adversarial analyst stress-testing bearish narratives about {target}. {kr}
+        "bear_critic": f"""You are an adversarial analyst stress-testing bearish narratives about {target}. {kr}
 ## 🔥 약세 내러티브 비판
 ### 과거 패턴 오남용
 ### 약세가 외면한 회복력 근거
 ### 같은 약세 논리의 실패 전례
 ### 과소평가한 정책 대응 [{cb}]
-### 약세 신뢰도 [1-10점 및 2줄 평가]"""
+### 약세 신뢰도 [1-10점 및 2줄 평가]""",
 
-    judge_sys = f"""You are a Chief Investment Strategist. Review all 6 analyst/critic outputs about {target} and select the most plausible narrative with supporting evidence. {kr}
+        "judge": f"""You are a Chief Investment Strategist. Review all 6 analyst/critic outputs about {target} and select the most plausible narrative. {kr}
 
 ## 핵심 요약
 [정확히 4문장. 1:가장 그럴듯한 내러티브. 2:가장 강력한 지지 증거. 3:경쟁 내러티브의 치명적 약점. 4:이 판단을 뒤집을 핵심 변수.]
@@ -257,17 +343,15 @@ def build_prompts(market: dict, stock: tuple = None):
 **약세장 (유의미한 하락): XX%**
 
 ### 이 판단을 뒤집을 핵심 변수 (상위 3개)
-결단하라."""
-
-    return {
-        "bull": bull_sys, "neutral": neutral_sys, "bear": bear_sys,
-        "bull_critic": bull_critic_sys, "neutral_critic": neutral_critic_sys,
-        "bear_critic": bear_critic_sys, "judge": judge_sys,
+결단하라.""",
     }
 
-# ─── CLAUDE API ────────────────────────────────────────────────────────────────
+# ─── CLAUDE API (사용자 본인 키 사용) ─────────────────────────────────────────
 def call_claude(system: str, user: str, web_search: bool = False) -> str:
-    client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+    api_key = get_user_api_key()
+    if not api_key:
+        raise RuntimeError("로그인이 필요합니다.")
+    client = anthropic.Anthropic(api_key=api_key)
     kwargs = dict(
         model="claude-opus-4-5",
         max_tokens=8000,
@@ -280,7 +364,7 @@ def call_claude(system: str, user: str, web_search: bool = False) -> str:
     return "".join(b.text for b in resp.content if hasattr(b, "text"))
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
-def extract_winner(text: str) -> str:
+def extract_winner(text):
     m = re.search(r"가장 그럴듯한 내러티브[^:：]*[：:]\s*\[?([^\]\n]+)\]?", text)
     if not m: return "unknown"
     raw = m.group(1)
@@ -288,7 +372,7 @@ def extract_winner(text: str) -> str:
     if "약세" in raw: return "bear"
     return "neutral"
 
-def extract_probs(text: str):
+def extract_probs(text):
     b = re.search(r"강세장[^:\n*]*[:\*]+\s*(\d+)%", text)
     n = re.search(r"보합장[^:\n*]*[:\*]+\s*(\d+)%", text)
     r = re.search(r"약세장[^:\n*]*[:\*]+\s*(\d+)%", text)
@@ -296,10 +380,10 @@ def extract_probs(text: str):
         return int(b.group(1)), int(n.group(1)), int(r.group(1))
     return None, None, None
 
-def winner_badge(w: str) -> str:
-    return {"bull": "📈 강세", "neutral": "➡️ 중립", "bear": "📉 약세"}.get(w, "❓")
+def winner_badge(w):
+    return {"bull":"📈 강세","neutral":"➡️ 중립","bear":"📉 약세"}.get(w,"❓")
 
-def age_label(hours: float) -> str:
+def age_label(hours):
     if hours < 1: return "방금"
     if hours < 24: return f"{int(hours)}시간 전"
     return f"{int(hours/24)}일 전"
@@ -307,246 +391,230 @@ def age_label(hours: float) -> str:
 # ─── RUN ANALYSIS ──────────────────────────────────────────────────────────────
 def run_analysis(target_id, target_label, market, stock, prompts):
     today = datetime.now().strftime("%Y년 %m월 %d일")
-    user_msg = f"오늘은 {today}입니다. 웹을 검색하여 {target_label}에 관한 최신 데이터, 뉴스, 애널리스트 코멘트를 수집하십시오. 구체적인 수치, 날짜, 출처를 반드시 인용하십시오."
-
+    user_msg = (
+        f"오늘은 {today}입니다. 웹을 검색하여 {target_label}에 관한 "
+        f"최신 데이터, 뉴스, 애널리스트 코멘트를 수집하십시오. "
+        f"구체적인 수치, 날짜, 출처를 반드시 인용하십시오."
+    )
     results = {}
     progress = st.progress(0)
     status   = st.empty()
+    total    = 7
 
-    agents_phase1 = ["bull", "neutral", "bear"]
-    agents_phase2 = ["bull_critic", "neutral_critic", "bear_critic"]
-
-    total = 7
-    done  = 0
-
-    # Phase 1 — 웹검색 O
+    # Phase 1
+    st.markdown("**Phase 1 · 내러티브 수집 (웹 검색)**")
     cols = st.columns(3)
-    ph1_areas = {a: cols[i].empty() for i, a in enumerate(agents_phase1)}
+    areas = {a: cols[i].empty() for i, a in enumerate(["bull","neutral","bear"])}
 
-    for agent in agents_phase1:
-        status.markdown(f"🔍 **{AGENT_LABELS[agent]}** 분석 중...")
-        ph1_areas[agent].info(f"{AGENT_LABELS[agent]}\n⏳ 웹 검색 중...")
+    for i, agent in enumerate(["bull","neutral","bear"]):
+        status.markdown(f"🔍 **{AGENT_LABELS[agent]}** 웹 검색 중...")
+        areas[agent].info(f"{AGENT_LABELS[agent]}\n⏳ 분석 중...")
         try:
-            res = call_claude(prompts[agent], user_msg, web_search=True)
-            results[agent] = res
-            ph1_areas[agent].success(f"{AGENT_LABELS[agent]}\n✅ 완료")
+            results[agent] = call_claude(prompts[agent], user_msg, web_search=True)
+            areas[agent].success(f"{AGENT_LABELS[agent]}\n✅ 완료")
         except Exception as e:
             results[agent] = f"⚠️ 오류: {e}"
-            ph1_areas[agent].warning(f"{AGENT_LABELS[agent]}\n⚠️ 오류")
-        done += 1
-        progress.progress(done / total)
+            areas[agent].warning(f"{AGENT_LABELS[agent]}\n⚠️ 오류")
+        progress.progress((i+1) / total)
 
-    # Phase 2 — 웹검색 X
-    st.markdown("---")
+    # Phase 2
+    st.markdown("**Phase 2 · 비판 검증**")
     cols2 = st.columns(3)
-    ph2_areas = {a: cols2[i].empty() for i, a in enumerate(agents_phase2)}
-
+    areas2 = {a: cols2[i].empty() for i, a in enumerate(["bull_critic","neutral_critic","bear_critic"])}
     critic_inputs = {
         "bull_critic":    f"[강세 내러티브]:\n{results.get('bull','')}\n\n냉정하게 비판하시오.",
         "neutral_critic": f"[중립 내러티브]:\n{results.get('neutral','')}\n\n냉정하게 비판하시오.",
         "bear_critic":    f"[약세 내러티브]:\n{results.get('bear','')}\n\n냉정하게 비판하시오.",
     }
-
-    for agent in agents_phase2:
+    for i, agent in enumerate(["bull_critic","neutral_critic","bear_critic"]):
         status.markdown(f"🔥 **{AGENT_LABELS[agent]}** 비판 중...")
-        ph2_areas[agent].info(f"{AGENT_LABELS[agent]}\n⏳ 비판 분석 중...")
+        areas2[agent].info(f"{AGENT_LABELS[agent]}\n⏳ 분석 중...")
         try:
-            res = call_claude(prompts[agent], critic_inputs[agent], web_search=False)
-            results[agent] = res
-            ph2_areas[agent].success(f"{AGENT_LABELS[agent]}\n✅ 완료")
+            results[agent] = call_claude(prompts[agent], critic_inputs[agent], web_search=False)
+            areas2[agent].success(f"{AGENT_LABELS[agent]}\n✅ 완료")
         except Exception as e:
             results[agent] = f"⚠️ 오류: {e}"
-            ph2_areas[agent].warning(f"{AGENT_LABELS[agent]}\n⚠️ 오류")
-        done += 1
-        progress.progress(done / total)
+            areas2[agent].warning(f"{AGENT_LABELS[agent]}\n⚠️ 오류")
+        progress.progress((4+i) / total)
 
-    # Phase 3 — Judge
-    st.markdown("---")
+    # Phase 3
+    st.markdown("**Phase 3 · 최종 판정**")
     status.markdown("⚡ **최종 판정자** 종합 분석 중...")
     judge_input = "\n\n".join([
         f"[{AGENT_LABELS[a]}]:\n{results.get(a,'')}"
         for a in ["bull","neutral","bear","bull_critic","neutral_critic","bear_critic"]
     ]) + "\n\n가장 그럴듯한 내러티브를 선정하고 근거를 제시하시오."
-
     try:
-        judge_res = call_claude(prompts["judge"], judge_input, web_search=False)
-        results["judge"] = judge_res
+        results["judge"] = call_claude(prompts["judge"], judge_input, web_search=False)
     except Exception as e:
         results["judge"] = f"⚠️ 오류: {e}"
-
-    done += 1
-    progress.progress(done / total)
+    progress.progress(1.0)
     status.success("✅ 분석 완료!")
 
-    # Save to Supabase
-    winner = extract_winner(results.get("judge", ""))
+    winner = extract_winner(results.get("judge",""))
     cache_set(target_id, market["id"], target_label, results, winner)
-
     return results, winner
 
 # ─── DISPLAY RESULTS ───────────────────────────────────────────────────────────
-def display_results(results: dict, winner: str, cached_at: str = None):
+def display_results(results, winner, cached_at=None):
     if cached_at:
-        analyzed_at = datetime.fromisoformat(cached_at.replace("Z","")).replace(tzinfo=timezone.utc)
-        age_h = (datetime.now(timezone.utc) - analyzed_at).total_seconds() / 3600
-        st.info(f"🗄 캐시된 결과 · {analyzed_at.strftime('%Y-%m-%d %H:%M')} KST 분석 · {CACHE_TTL_HOURS - age_h:.0f}시간 후 만료")
+        at = datetime.fromisoformat(cached_at.replace("Z","")).replace(tzinfo=timezone.utc)
+        age_h = (datetime.now(timezone.utc) - at).total_seconds() / 3600
+        st.info(f"🗄 공유 캐시 결과 · {at.strftime('%Y-%m-%d %H:%M')} UTC 분석 · {CACHE_TTL_HOURS-age_h:.0f}시간 후 만료")
 
-    # Winner banner
-    w_map = {"bull": ("📈 강세", "#00e87a"), "neutral": ("➡️ 중립", "#f5c518"), "bear": ("📉 약세", "#ff3c4e")}
-    w_label, w_color = w_map.get(winner, ("❓", "#888"))
+    w_map = {"bull":("📈 강세","#00e87a"), "neutral":("➡️ 중립","#f5c518"), "bear":("📉 약세","#ff3c4e")}
+    w_label, w_color = w_map.get(winner, ("❓","#888"))
     st.markdown(f"""
-    <div style="text-align:center; padding:16px; background:linear-gradient(135deg,{w_color}18,transparent);
-    border:2px solid {w_color}66; border-radius:10px; margin:12px 0">
-        <div style="color:#888; font-size:11px; letter-spacing:2px; margin-bottom:6px">가장 그럴듯한 내러티브</div>
-        <div style="color:{w_color}; font-size:24px; font-weight:900">{w_label}</div>
+    <div style='text-align:center; padding:16px;
+    background:linear-gradient(135deg,{w_color}18,transparent);
+    border:2px solid {w_color}66; border-radius:10px; margin:12px 0'>
+        <div style='color:#666; font-size:11px; letter-spacing:2px; margin-bottom:6px'>
+        가장 그럴듯한 내러티브</div>
+        <div style='color:{w_color}; font-size:24px; font-weight:900'>{w_label}</div>
     </div>""", unsafe_allow_html=True)
 
-    # Probability bars
-    bp, np_, rp = extract_probs(results.get("judge", ""))
+    bp, np_, rp = extract_probs(results.get("judge",""))
     if bp is not None:
         st.markdown("#### 확률 분포")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("📈 강세장", f"{bp}%")
-        c1.progress(bp / 100)
-        c2.metric("➡️ 보합장", f"{np_}%")
-        c2.progress(np_ / 100)
-        c3.metric("📉 약세장", f"{rp}%")
-        c3.progress(rp / 100)
+        c1,c2,c3 = st.columns(3)
+        c1.metric("📈 강세장", f"{bp}%"); c1.progress(bp/100)
+        c2.metric("➡️ 보합장", f"{np_}%"); c2.progress(np_/100)
+        c3.metric("📉 약세장", f"{rp}%"); c3.progress(rp/100)
 
     st.markdown("---")
-
-    # Phase 1 expanders
     st.markdown("### Phase 1 · 내러티브 수집")
-    for a in ["bull", "neutral", "bear"]:
+    for a in ["bull","neutral","bear"]:
         with st.expander(AGENT_LABELS[a]):
-            st.markdown(results.get(a, "결과 없음"))
+            st.markdown(results.get(a,"결과 없음"))
 
-    # Phase 2 expanders
     st.markdown("### Phase 2 · 비판 검증")
-    for a in ["bull_critic", "neutral_critic", "bear_critic"]:
+    for a in ["bull_critic","neutral_critic","bear_critic"]:
         with st.expander(AGENT_LABELS[a]):
-            st.markdown(results.get(a, "결과 없음"))
+            st.markdown(results.get(a,"결과 없음"))
 
-    # Judge
     st.markdown("### Phase 3 · 최종 판정")
-    with st.expander("⚡ 최종 판정자 전문 보기", expanded=True):
-        st.markdown(results.get("judge", "결과 없음"))
+    with st.expander("⚡ 최종 판정자 전문", expanded=True):
+        st.markdown(results.get("judge","결과 없음"))
 
 # ─── LEADERBOARD ───────────────────────────────────────────────────────────────
 def display_leaderboard():
-    rows = load_leaderboard()
+    rows  = load_leaderboard()
     total = 3 + 20 * 3  # 63
     done  = len(rows)
     pct   = int(done / total * 100)
 
     st.markdown("### 📊 공유 분석 현황 (48시간 내)")
-    st.progress(pct / 100, text=f"{done} / {total} 분석 완료 ({pct}%)")
+    st.progress(pct/100, text=f"{done} / {total} 완료 ({pct}%) — 모든 사용자가 공유")
 
     if not rows:
-        st.caption("아직 분석된 항목이 없습니다. 첫 번째 분석을 시작해보세요!")
+        st.caption("아직 분석 없음. 첫 분석을 시작해보세요!")
         return
 
-    st.markdown(f"**총 {done}개 완료** · 클릭하면 해당 분석 결과로 이동")
-
-    # Group by market
-    market_order = ["kospi200", "sp500", "nikkei225"]
-    market_names  = {"kospi200":"🇰🇷 KOSPI 200", "sp500":"🇺🇸 S&P 500", "nikkei225":"🇯🇵 닛케이 225"}
-
-    for mid in market_order:
+    market_names = {"kospi200":"🇰🇷 KOSPI 200","sp500":"🇺🇸 S&P 500","nikkei225":"🇯🇵 닛케이 225"}
+    for mid in ["kospi200","sp500","nikkei225"]:
         group = [r for r in rows if r["market_id"] == mid]
-        if not group:
-            continue
-        with st.expander(f"{market_names[mid]} · {len(group)}개", expanded=False):
-            header = ["순위", "종목/지수", "판정", "분석 시각"]
-            col_w  = [0.5, 2.5, 1, 1]
-            h_cols = st.columns(col_w)
-            for h, c in zip(header, h_cols):
-                c.markdown(f"**{h}**")
-            st.divider()
+        if not group: continue
+        with st.expander(f"{market_names[mid]} · {len(group)}개 완료", expanded=False):
             for i, row in enumerate(group, 1):
-                r_cols = st.columns(col_w)
-                r_cols[0].markdown(f"`#{i}`")
-                r_cols[1].markdown(row["target_label"])
-                r_cols[2].markdown(winner_badge(row.get("winner", "")))
-                r_cols[3].markdown(age_label(row["age_hours"]))
+                c1,c2,c3,c4 = st.columns([0.5,2.5,1,1])
+                c1.markdown(f"`#{i}`")
+                c2.markdown(row["target_label"])
+                c3.markdown(winner_badge(row.get("winner","")))
+                c4.markdown(age_label(row["age_hours"]))
 
-# ─── MAIN APP ──────────────────────────────────────────────────────────────────
+# ─── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
-    st.markdown("""
-    <h1 style='text-align:center; background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);
-    -webkit-background-clip:text; -webkit-text-fill-color:transparent; font-size:28px'>
-    ⚡ 시장 방향 판정 엔진</h1>
-    <p style='text-align:center; color:#444; font-size:12px; letter-spacing:2px'>
-    7-AGENT AI · 내러티브 수집 → 비판 검증 → 최종 판정 · 향후 3개월 분석</p>
-    """, unsafe_allow_html=True)
+    # 로그인 확인
+    if not get_user_api_key():
+        show_login_page()
+        return
 
-    # Leaderboard (항상 상단 표시)
+    # ── 헤더 + 로그아웃 ────────────────────────────────────────────────────────
+    col_title, col_logout = st.columns([5, 1])
+    with col_title:
+        st.markdown("""
+        <h1 style='background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);
+        -webkit-background-clip:text; -webkit-text-fill-color:transparent; font-size:26px; margin:0'>
+        ⚡ 시장 방향 판정 엔진</h1>
+        <p style='color:#444; font-size:11px; letter-spacing:2px; margin:2px 0 0'>
+        7-AGENT AI · 내러티브 수집 → 비판 검증 → 최종 판정 · 향후 3개월</p>
+        """, unsafe_allow_html=True)
+    with col_logout:
+        key = get_user_api_key()
+        masked = f"...{key[-4:]}" if key else ""
+        st.markdown(f"<div style='color:#333; font-size:10px; text-align:right; margin-top:6px'>🔑 {masked}</div>", unsafe_allow_html=True)
+        if st.button("로그아웃", use_container_width=True):
+            del st.session_state["user_api_key"]
+            st.session_state.clear()
+            st.rerun()
+
+    st.markdown("---")
+
+    # ── 랭킹 ───────────────────────────────────────────────────────────────────
     display_leaderboard()
     st.markdown("---")
 
-    # ── 시장 선택 ─────────────────────────────────────────────────────────────
+    # ── 시장 선택 ──────────────────────────────────────────────────────────────
     st.markdown("### STEP 1 · 시장 선택")
     market_choice = st.radio("", list(MARKETS.keys()), horizontal=True, label_visibility="collapsed")
     market = MARKETS[market_choice]
 
-    # ── 분석 대상 선택 ────────────────────────────────────────────────────────
+    # ── 종목 선택 ──────────────────────────────────────────────────────────────
     st.markdown("### STEP 2 · 분석 대상")
     stocks = STOCKS[market["id"]]
-    stock_options = ["📊 지수 전체"] + [f"{t} · {n} ({s})" for t, n, s in stocks]
-    target_choice = st.selectbox("종목을 선택하거나 지수 전체를 선택하세요", stock_options, label_visibility="collapsed")
+    options = ["📊 지수 전체"] + [f"{t} · {n} ({s})" for t,n,s in stocks]
+    choice = st.selectbox("", options, label_visibility="collapsed")
 
-    if target_choice == "📊 지수 전체":
-        stock = None
-        target_id    = market["id"]
+    if choice == "📊 지수 전체":
+        stock, target_id = None, market["id"]
         target_label = f"{market['flag']} {market['index']}"
     else:
-        idx = stock_options.index(target_choice) - 1
+        idx = options.index(choice) - 1
         stock = stocks[idx]
         target_id    = f"{market['id']}_{stock[0]}"
         target_label = f"{stock[1]} ({stock[0]})"
 
     st.markdown(f"**선택:** {target_label}")
 
-    # ── 캐시 확인 ─────────────────────────────────────────────────────────────
+    # ── 캐시 확인 + 실행 ───────────────────────────────────────────────────────
     cached = cache_get(target_id)
-
-    col_a, col_b = st.columns([3, 1])
+    col_a, col_b = st.columns([3,1])
 
     if cached:
-        age_h = (datetime.now(timezone.utc) - datetime.fromisoformat(cached["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)).total_seconds() / 3600
-        remaining_h = CACHE_TTL_HOURS - age_h
+        at = datetime.fromisoformat(cached["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
+        age_h = (datetime.now(timezone.utc) - at).total_seconds() / 3600
+        remaining = CACHE_TTL_HOURS - age_h
         with col_a:
-            if st.button(f"🗄 캐시 결과 불러오기 ({remaining_h:.0f}시간 남음)", type="primary", use_container_width=True):
+            if st.button(f"🗄 공유 캐시 불러오기 ({remaining:.0f}시간 남음, 토큰 0 소모)", type="primary", use_container_width=True):
+                st.session_state["res_results"] = cached["results"]
+                st.session_state["res_winner"]  = cached.get("winner","unknown")
+                st.session_state["res_cached_at"] = cached["analyzed_at"]
                 st.session_state["show_results"] = True
-                st.session_state["cached_results"] = cached["results"]
-                st.session_state["cached_winner"]  = cached.get("winner", "unknown")
-                st.session_state["cached_at"] = cached["analyzed_at"]
         with col_b:
             if st.button("🗑 재분석", use_container_width=True):
                 cache_delete(target_id)
                 st.session_state.pop("show_results", None)
-                st.success("캐시 삭제됨. 아래 버튼으로 재분석하세요.")
+                st.success("캐시 삭제. 아래 버튼으로 재분석하세요.")
                 st.rerun()
     else:
         with col_a:
-            if st.button(f"▶ {target_label} 분석 시작", type="primary", use_container_width=True):
+            if st.button(f"▶ {target_label} 분석 시작 (내 API 키 사용)", type="primary", use_container_width=True):
                 st.session_state.pop("show_results", None)
                 prompts = build_prompts(market, stock)
-                with st.spinner("7개 에이전트 분석 중... (약 3~5분 소요)"):
-                    results, winner = run_analysis(target_id, target_label, market, stock, prompts)
-                st.session_state["show_results"] = True
-                st.session_state["cached_results"] = results
-                st.session_state["cached_winner"]  = winner
-                st.session_state["cached_at"] = None
+                results, winner = run_analysis(target_id, target_label, market, stock, prompts)
+                st.session_state["res_results"]   = results
+                st.session_state["res_winner"]    = winner
+                st.session_state["res_cached_at"] = None
+                st.session_state["show_results"]  = True
                 st.rerun()
 
-    # ── 결과 표시 ─────────────────────────────────────────────────────────────
+    # ── 결과 표시 ──────────────────────────────────────────────────────────────
     if st.session_state.get("show_results"):
         st.markdown("---")
         display_results(
-            st.session_state["cached_results"],
-            st.session_state["cached_winner"],
-            st.session_state.get("cached_at"),
+            st.session_state["res_results"],
+            st.session_state["res_winner"],
+            st.session_state.get("res_cached_at"),
         )
 
     st.markdown("---")
