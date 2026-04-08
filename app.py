@@ -11,25 +11,57 @@ st.set_page_config(page_title="시장 방향 판정 엔진", page_icon="⚡", la
 
 st.markdown("""
 <style>
-body, .stApp { background: #07070d !important; color: #fff !important; }
-.block-container { padding-top: 1.5rem; }
+body, .stApp { background: #f8f9fc !important; color: #1a1a2e !important; }
+.block-container { padding-top: 1.5rem; max-width: 1100px; }
+/* 버튼 */
 .stButton > button {
-    background: transparent; border: 1px solid #444;
-    color: #ccc; border-radius: 6px; font-size: 13px;
+    background: #fff; border: 1.5px solid #d0d5e0;
+    color: #2d3a5e; border-radius: 7px; font-size: 13px;
+    font-weight: 500; transition: all 0.18s;
 }
-.stButton > button:hover { border-color: #888; color: #fff; }
-h1, h2, h3 { color: #fff !important; }
-.stExpander { background: #0c0c18 !important; border: 1px solid #1a1a2a !important; }
-div[data-testid="stExpander"] > div { background: #09090f !important; }
+.stButton > button:hover {
+    border-color: #4a7cf7; color: #4a7cf7; background: #eef2ff;
+}
+/* 헤딩 */
+h1, h2, h3 { color: #1a1a2e !important; }
+/* 확장 패널 */
+.stExpander {
+    background: #fff !important;
+    border: 1.5px solid #e2e6ef !important;
+    border-radius: 8px !important;
+}
+div[data-testid="stExpander"] > div { background: #fff !important; }
+div[data-testid="stExpander"] summary { color: #2d3a5e !important; font-weight: 600; }
+/* 입력창 */
 .stTextInput > div > div > input {
-    background: #0d0d14; border: 1px solid #1e1e2a;
-    color: #ccc; border-radius: 6px;
+    background: #fff; border: 1.5px solid #d0d5e0;
+    color: #1a1a2e; border-radius: 7px;
 }
-.stSelectbox > div > div { background: #0d0d14 !important; color: #ccc !important; }
+/* 셀렉트박스 */
+.stSelectbox > div > div {
+    background: #fff !important; color: #1a1a2e !important;
+    border: 1.5px solid #d0d5e0 !important; border-radius: 7px !important;
+}
+/* 메트릭 카드 */
 div[data-testid="metric-container"] {
-    background: #0c0c18; border: 1px solid #1a1a2a;
-    border-radius: 8px; padding: 12px;
+    background: #fff; border: 1.5px solid #e2e6ef;
+    border-radius: 10px; padding: 14px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
 }
+div[data-testid="metric-container"] label { color: #6b7a9e !important; }
+div[data-testid="metric-container"] div[data-testid="stMetricValue"] { color: #1a1a2e !important; }
+/* 라디오 */
+.stRadio label { color: #2d3a5e !important; }
+/* 캡션 */
+.stCaption { color: #8892ab !important; }
+/* 성공/정보 박스 */
+div[data-testid="stAlert"] { border-radius: 8px !important; }
+/* Progress bar */
+.stProgress > div > div { background: #4a7cf7 !important; }
+/* 구분선 */
+hr { border-color: #e2e6ef !important; }
+/* 사이드바 없을 때 여백 */
+section[data-testid="stSidebar"] { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -142,6 +174,59 @@ EXA_SNS_DOMAINS = [
     "stockvoice.jp",
 ]
 
+# ─── SNS 쿼리 시장별 분기 ─────────────────────────────────────────────────────
+def _build_sns_queries(target: str, direction: str, market_id: str, year: int) -> list[str]:
+    """
+    시장별로 SNS 쿼리와 도메인을 다르게 구성.
+
+    한국(KOSPI):
+      - 네이버 종토방, 한경 커뮤니티, 인베스팅 등 한국어 커뮤니티
+      - 한국어 쿼리로 감성 검색
+    일본(Nikkei):
+      - みんかぶ, 株探, Yahoo Japan Finance 게시판
+      - 일본어 쿼리
+    미국(S&P 500):
+      - Reddit r/stocks r/investing, StockTwits
+      - 영어 쿼리
+    """
+    dir_en = {"bull": "bullish buy positive", "neutral": "hold wait uncertain", "bear": "bearish sell risk"}[direction]
+
+    if market_id == "kospi200":
+        # 한국어 커뮤니티 — Tavily가 네이버·한경 등 인덱스 보유
+        return [
+            f"{target} 주식 투자자 반응 {direction} 커뮤니티 종토방 {year}",
+            f"{target} 매수 매도 개인투자자 여론 주식 게시판 {year}",
+        ]
+    elif market_id == "nikkei225":
+        # 일본어 커뮤니티
+        return [
+            f"{target} 株 投資家 掲示板 {direction} 意見 みんかぶ {year}",
+            f"{target} 株価 個人投資家 口コミ 買い 売り {year}",
+        ]
+    else:
+        # 영어권 (S&P 500 기본)
+        return [
+            f"{target} stock {dir_en} investors community Reddit StockTwits {year}",
+            f"{target} stock discussion sentiment retail investors {year}",
+        ]
+
+def _get_sns_domains(market_id: str) -> list[str]:
+    """시장별 SNS 도메인"""
+    if market_id == "kospi200":
+        return [
+            "finance.naver.com", "hankyung.com", "mk.co.kr",
+            "investing.com", "stockplus.com", "therich.io",
+            "ppomppu.co.kr", "clien.net", "fmkorea.com",
+        ]
+    elif market_id == "nikkei225":
+        return [
+            "minkabu.jp", "kabutan.jp", "finance.yahoo.co.jp",
+            "stockvoice.jp", "nikkeibp.co.jp",
+        ]
+    else:
+        return ["reddit.com", "stocktwits.com", "x.com", "twitter.com"]
+
+
 # ─── TICKER MAPPING (FMP용: 종목코드 → 영문 티커) ─────────────────────────────
 # FMP는 미국 티커 기준. 한국·일본은 종목코드.XXX 형식 사용
 FMP_TICKER_MAP = {
@@ -162,7 +247,7 @@ FMP_TICKER_MAP = {
 }
 
 # ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
-def build_queries(target: str, direction: str, market_index: str, sector: str = "") -> dict:
+def build_queries(target: str, direction: str, market_index: str, sector: str = "", market_id: str = "sp500") -> dict:
     now    = datetime.now()
     year   = now.year
     month  = now.strftime("%B %Y")
@@ -179,10 +264,7 @@ def build_queries(target: str, direction: str, market_index: str, sector: str = 
             f"Expert analysis why {target} stock will outperform in {year}",
             f"{target}{sector_note} undervalued catalyst growth story analyst recommendation",
         ]
-        exa_sns_q = [
-            f"{target} stock bullish investors excited positive sentiment Reddit StockTwits",
-            f"Why I'm buying {target} stock community discussion {year}",
-        ]
+        exa_sns_q = _build_sns_queries(target, "bull", market_id, year)
     elif direction == "neutral":
         tavily_q = [
             f"{target} stock hold neutral rating mixed outlook analyst {month}",
@@ -194,10 +276,7 @@ def build_queries(target: str, direction: str, market_index: str, sector: str = 
             f"{target}{sector_note} wait and see cautious analyst note {year}",
             f"{market_index} range-bound sideways market analysis competing forces",
         ]
-        exa_sns_q = [
-            f"{target} stock mixed opinion community debate uncertain Reddit {year}",
-            f"Is {target} worth holding investors discussion {month}",
-        ]
+        exa_sns_q = _build_sns_queries(target, "neutral", market_id, year)
     else:  # bear
         tavily_q = [
             f"{target} stock sell downgrade target price cut analyst {month}",
@@ -209,16 +288,60 @@ def build_queries(target: str, direction: str, market_index: str, sector: str = 
             f"Expert column why {target} stock is overvalued or facing headwinds {year}",
             f"{target}{sector_note} structural decline competition disruption analysis",
         ]
-        exa_sns_q = [
-            f"{target} stock bearish investors worried concern Reddit StockTwits {year}",
-            f"Why I sold {target} stock community discussion risk {month}",
-        ]
+        exa_sns_q = _build_sns_queries(target, "bear", market_id, year)
 
     return {
         "tavily":      tavily_q,
         "exa_report":  exa_report_q,
         "exa_sns":     exa_sns_q,
     }
+
+# ─── 현재가 실시간 조회 ────────────────────────────────────────────────────────
+def fetch_current_price(target: str, ticker_raw: str, market_id: str) -> str:
+    """
+    Tavily로 현재 주가를 실시간 검색.
+    Judge에게 실제 가격 컨텍스트를 제공해 환각 방지.
+    """
+    client = get_tavily()
+
+    # 시장별 쿼리 최적화
+    if market_id == "kospi200":
+        queries = [
+            f"{target} 현재 주가 오늘 {ticker_raw} 코스피",
+            f"삼성전자 SK하이닉스 {target} 주가 실시간",
+        ] if ticker_raw else [f"KOSPI 200 지수 현재 오늘"]
+    elif market_id == "nikkei225":
+        queries = [
+            f"{target} 株価 現在 今日 {ticker_raw}",
+            f"日経225 {target} 最新株価",
+        ] if ticker_raw else [f"日経225 指数 現在値 今日"]
+    else:  # sp500
+        queries = [
+            f"{target} stock price today current {ticker_raw}",
+            f"S&P 500 {target} share price live",
+        ] if ticker_raw else [f"S&P 500 index current level today"]
+
+    price_snippets = []
+    for query in queries[:2]:
+        try:
+            resp = client.search(query, max_results=3, search_depth="basic")
+            for r in resp.get("results", []):
+                content = r.get("content", "")[:300]
+                title   = r.get("title", "")
+                url     = r.get("url", "")
+                date    = r.get("published_date", "")[:10]
+                if content:
+                    price_snippets.append(f"■ {title} ({date})\n  출처: {url}\n  {content}")
+        except:
+            pass
+
+    if not price_snippets:
+        return "[현재가 검색 실패 — 가격 언급 시 반드시 출처 명시 필요]"
+
+    return (
+        f"【현재 주가 검색 결과 ({datetime.now().strftime('%Y-%m-%d %H:%M')})】\n"
+        + "\n\n".join(price_snippets)
+    )
 
 # ─── TAVILY SEARCH ─────────────────────────────────────────────────────────────
 def search_tavily(queries: list[str]) -> list[dict]:
@@ -272,7 +395,7 @@ def search_exa_reports(queries: list[str], recent_days: int = 90) -> list[dict]:
     return results
 
 # ─── TAVILY: SNS·커뮤니티 여론 ───────────────────────────────────────────────
-def search_tavily_sns(queries: list[str]) -> list[dict]:
+def search_tavily_sns(queries: list[str], market_id: str = "sp500") -> list[dict]:
     """
     Tavily로 Reddit·StockTwits·커뮤니티 여론 수집.
     (Exa는 Reddit 크롤러 차단 → Tavily는 Google 인덱스 경유 접근 가능)
@@ -281,12 +404,12 @@ def search_tavily_sns(queries: list[str]) -> list[dict]:
     seen, results = set(), []
     for query in queries:
         try:
+            domains = _get_sns_domains(market_id)
             resp = client.search(
                 query,
                 max_results=5,
                 search_depth="advanced",
-                include_domains=["reddit.com", "stocktwits.com",
-                                 "finance.naver.com", "minkabu.jp", "kabutan.jp"],
+                include_domains=domains,
             )
             for r in resp.get("results", []):
                 url = r.get("url", "")
@@ -402,7 +525,8 @@ def combined_search(
     direction: str,
     market_index: str,
     sector: str = "",
-    ticker_raw: str = "",        # FMP용 원본 종목코드
+    ticker_raw: str = "",
+    market_id: str = "sp500",
 ) -> str:
     """
     4개 소스 통합:
@@ -411,11 +535,11 @@ def combined_search(
     3) Exa SNS  — Reddit·StockTwits·커뮤니티 Raw 여론
     4) FMP      — 최신 어닝콜 트랜스크립트 (종목일 때만)
     """
-    queries = build_queries(target, direction, market_index, sector)
+    queries = build_queries(target, direction, market_index, sector, market_id)
 
     tavily_res  = search_tavily(queries["tavily"])
     report_res  = search_exa_reports(queries["exa_report"])
-    sns_res     = search_tavily_sns(queries["exa_sns"])
+    sns_res     = search_tavily_sns(queries["exa_sns"], market_id=market_id)
     earnings_tx = fetch_earnings_transcript(ticker_raw) if ticker_raw else "[지수 분석 — 어닝콜 해당 없음]"
 
     def fmt_items(items: list[dict], label: str, show_platform: bool = False) -> str:
@@ -474,15 +598,15 @@ def show_login_page():
     <h1 style='text-align:center; background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);
     -webkit-background-clip:text; -webkit-text-fill-color:transparent; font-size:28px; margin-bottom:4px'>
     ⚡ 시장 방향 판정 엔진</h1>
-    <p style='text-align:center; color:#444; font-size:12px; letter-spacing:2px; margin-bottom:40px'>
+    <p style='text-align:center; color:#4a5568; font-size:12px; letter-spacing:2px; margin-bottom:40px'>
     7-AGENT AI · 강세/중립/약세 내러티브 분석 · 향후 3개월 판정</p>
     """, unsafe_allow_html=True)
 
     _, col_c, _ = st.columns([1, 2, 1])
     with col_c:
         st.markdown("""
-        <div style='background:#0c0c18; border:1px solid #1a1a2a; border-radius:12px; padding:32px 36px;'>
-        <div style='color:#888; font-size:11px; letter-spacing:2px; margin-bottom:20px; text-align:center'>
+        <div style='background:#ffffff; border:1px solid #e2e6ef; border-radius:12px; padding:32px 36px;'>
+        <div style='color:#8892ab; font-size:11px; letter-spacing:2px; margin-bottom:20px; text-align:center'>
         🔑 ANTHROPIC API 키로 로그인</div>
         """, unsafe_allow_html=True)
 
@@ -503,7 +627,7 @@ def show_login_page():
 
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("""
-        <div style='margin-top:20px; color:#333; font-size:11px; line-height:1.9; text-align:center'>
+        <div style='margin-top:20px; color:#374151; font-size:11px; line-height:1.9; text-align:center'>
         API 키가 없으신가요?<br>
         <a href='https://console.anthropic.com/settings/keys' target='_blank'
            style='color:#4fc3f7'>console.anthropic.com</a> 에서 무료 발급<br><br>
@@ -580,7 +704,8 @@ def build_system_prompts(market: dict, stock: tuple = None):
 ### 어닝콜 핵심 포인트 [경영진 발언·가이던스 중 강세 근거]
 ### 강세 전제 조건
 ### 강세 내러티브 3줄 요약
-출처(기관명, 날짜, URL, 커뮤니티명)를 반드시 명시하시오.""",
+출처(기관명, 날짜, URL, 커뮤니티명)를 반드시 명시하시오.
+⚠️ 검색 결과에 없는 주가·목표가·손절가를 절대 만들어내지 말 것. 수치는 출처가 있는 것만 인용.""",
 
         "neutral": f"""You are a research analyst. You will receive results from 4 sources about {target}{sector_note}. {kr}
 ## ➡️ {target} 중립 내러티브 수집 (향후 3개월)
@@ -591,7 +716,8 @@ def build_system_prompts(market: dict, stock: tuple = None):
 ### 어닝콜 핵심 포인트 [경영진 발언 중 불확실성·중립 신호]
 ### 중립 전제 조건
 ### 중립 내러티브 3줄 요약
-출처(기관명, 날짜, URL, 커뮤니티명)를 반드시 명시하시오.""",
+출처(기관명, 날짜, URL, 커뮤니티명)를 반드시 명시하시오.
+⚠️ 검색 결과에 없는 주가·목표가·손절가를 절대 만들어내지 말 것. 수치는 출처가 있는 것만 인용.""",
 
         "bear": f"""You are a research analyst. You will receive results from 4 sources about {target}{sector_note}. {kr}
 ## 📉 {target} 약세 내러티브 수집 (향후 3개월)
@@ -602,7 +728,8 @@ def build_system_prompts(market: dict, stock: tuple = None):
 ### 어닝콜 핵심 포인트 [경영진 발언 중 리스크·약세 시그널]
 ### 약세 전제 조건
 ### 약세 내러티브 3줄 요약
-출처(기관명, 날짜, URL, 커뮤니티명)를 반드시 명시하시오.""",
+출처(기관명, 날짜, URL, 커뮤니티명)를 반드시 명시하시오.
+⚠️ 검색 결과에 없는 주가·목표가·손절가를 절대 만들어내지 말 것. 수치는 출처가 있는 것만 인용.""",
 
         "bull_critic": f"""You are an adversarial analyst stress-testing bullish narratives about {target}. {kr}
 ## 🔥 강세 내러티브 비판
@@ -628,32 +755,49 @@ def build_system_prompts(market: dict, stock: tuple = None):
 ### 과소평가한 정책 대응 [{cb}]
 ### 약세 신뢰도 [1-10점 및 2줄 평가]""",
 
-        "judge": f"""You are a Chief Investment Strategist. You will review all 6 analyst/critic outputs and select the most plausible narrative with supporting evidence. {kr}
+        "judge": f"""You are a Chief Investment Strategist reviewing a structured 6-agent debate about {target}. {kr}
+
+⚠️ 절대 금지 사항 (hallucination 방지):
+- 입력된 【실시간 현재가 정보】에 없는 주가 수치를 절대 만들어내지 말 것
+- 검색 결과에 명시되지 않은 손절가·익절가·목표가를 생성 금지
+- 수치를 인용할 때는 반드시 "○○기관에 따르면" 등 출처를 명시할 것
+- 실시간 현재가 섹션에 가격이 있다면, 그 가격을 기준으로 % 등락을 서술할 것
 
 ## 핵심 요약
-[정확히 4문장. 1:가장 그럴듯한 내러티브. 2:가장 강력한 지지 증거. 3:경쟁 내러티브의 치명적 약점. 4:이 판단을 뒤집을 핵심 변수.]
+[정확히 4문장.
+1문장: 세 내러티브 중 가장 그럴듯한 것과 핵심 이유.
+2문장: 검색 결과에서 확인된 가장 강력한 지지 근거 (현재가 포함).
+3문장: 경쟁 내러티브의 치명적 약점.
+4문장: 이 판단을 뒤집을 수 있는 핵심 변수.]
 
 ## ⚡ 최종 판정
 
 ### 가장 그럴듯한 내러티브: [강세 / 중립 / 약세]
-[설득력 있는 스토리 서술]
+[이 방향이 가장 설득력 있는 이유. 현재가를 기준으로 서술. 검색 결과 사실만 활용.]
 
-### 핵심 근거
-**근거 1:** [구체적 수치·기관·데이터]
-**근거 2:** [두 번째 지지 근거]
-**근거 3:** [세 번째 지지 근거]
-**근거 4:** [네 번째 지지 근거]
-**근거 5:** [다섯 번째 지지 근거]
+### 현재 가격 기준 상황
+[실시간 현재가 정보에서 확인된 가격과 최근 주가 흐름 요약]
+
+### 핵심 근거 (검색 결과·현재가에서 확인된 사실만)
+**근거 1:** [출처 명시 + 구체적 사실]
+**근거 2:** [출처 명시 + 구체적 사실]
+**근거 3:** [출처 명시 + 구체적 사실]
+**근거 4:** [출처 명시 + 구체적 사실]
+**근거 5:** [출처 명시 + 구체적 사실]
 
 ### 경쟁 내러티브 탈락 이유
+[강세/중립/약세 중 탈락한 둘의 약점. 검색 결과 근거로 설명.]
 
 ### 확률 분포
 **강세장 (유의미한 상승): XX%**
 **보합장 (박스권): XX%**
 **약세장 (유의미한 하락): XX%**
+[반드시 합계 100%]
 
-### 이 판단을 뒤집을 핵심 변수 (상위 3개)
-결단하라.""",
+### 주시해야 할 핵심 변수 (상위 3개)
+[이 판단을 바꿀 수 있는 향후 이벤트·데이터 발표]
+
+결단하라. 단, 모르는 수치는 만들지 말라.""",
     }
 
 # ─── CLAUDE API ────────────────────────────────────────────────────────────────
@@ -672,12 +816,19 @@ def call_claude(system: str, user_content: str, max_tokens: int = 4000) -> str:
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
 def extract_winner(text):
-    m = re.search(r"가장 그럴듯한 내러티브[^:：]*[：:]\s*\[?([^\]\n]+)\]?", text)
-    if not m: return "unknown"
-    raw = m.group(1)
-    if "강세" in raw: return "bull"
-    if "약세" in raw: return "bear"
-    return "neutral"
+    """텍스트에서 '가장 그럴듯한 내러티브' 라인을 파싱. 보조 수단으로만 사용."""
+    m = re.search(r"가장 그럴듯한 내러티브[^:：\n]*[：:]\s*\[?([^\]\n]+)\]?", text)
+    if not m: return None   # None 반환 → 확률로 결정
+    raw = m.group(1).strip()
+    if "강세" in raw and "약세" not in raw: return "bull"
+    if "약세" in raw and "강세" not in raw: return "bear"
+    if "중립" in raw or "보합" in raw: return "neutral"
+    return None
+
+def winner_from_probs(bull_p, neutral_p, bear_p):
+    """확률 기반으로 winner 결정 — 항상 정확."""
+    probs = {"bull": bull_p or 0, "neutral": neutral_p or 0, "bear": bear_p or 0}
+    return max(probs, key=probs.get)
 
 def extract_probs(text):
     b = re.search(r"강세장[^:\n*]*[:\*]+\s*(\d+)%", text)
@@ -719,6 +870,7 @@ def run_analysis(target_id, target_label, market, stock, prompts):
             search_results = combined_search(
                 target_short, direction, market["index"],
                 sector=sector, ticker_raw=ticker_raw,
+                market_id=market["id"],
             )
 
             areas[agent].info(f"{AGENT_LABELS[agent]}\n🤖 Claude 분석 중...")
@@ -764,14 +916,24 @@ def run_analysis(target_id, target_label, market, stock, prompts):
             areas2[agent].warning(f"{AGENT_LABELS[agent]}\n⚠️ 오류")
         progress.progress((4 + i) / 7)
 
-    # ── Phase 3: Judge ────────────────────────────────────────────────────────
+    # ── Phase 3: Judge (현재가 실시간 검색 후 주입) ──────────────────────────
     st.markdown("**Phase 3 · 최종 판정**")
+    status.markdown("📡 **현재 주가 실시간 조회 중...**")
+
+    price_context = fetch_current_price(target_short, ticker_raw, market["id"])
+
     status.markdown("⚡ **최종 판정자** 종합 분석 중...")
     try:
-        judge_input = "\n\n".join([
-            f"[{AGENT_LABELS[a]}]:\n{results.get(a,'')}"
-            for a in ["bull","neutral","bear","bull_critic","neutral_critic","bear_critic"]
-        ]) + "\n\n가장 그럴듯한 내러티브를 선정하고 근거를 제시하시오."
+        judge_input = (
+            f"【실시간 현재가 정보 — 반드시 이 가격을 기준으로 판단하시오】\n"
+            f"{price_context}\n\n"
+            f"{'='*60}\n\n"
+            + "\n\n".join([
+                f"[{AGENT_LABELS[a]}]:\n{results.get(a,'')}"
+                for a in ["bull","neutral","bear","bull_critic","neutral_critic","bear_critic"]
+            ])
+            + "\n\n위 토론과 실시간 현재가를 종합하여 최종 판정을 내리시오."
+        )
         results["judge"] = call_claude(prompts["judge"], judge_input, max_tokens=8000)
     except Exception as e:
         results["judge"] = f"⚠️ 오류: {e}"
@@ -779,11 +941,18 @@ def run_analysis(target_id, target_label, market, stock, prompts):
     progress.progress(1.0)
     status.success("✅ 분석 완료!")
 
-    winner = extract_winner(results.get("judge",""))
+    # ★ winner는 확률 기반으로 결정 (텍스트 파싱은 보조)
     bull_p, neutral_p, bear_p = extract_probs(results.get("judge",""))
+    bull_p   = bull_p   or 50
+    neutral_p = neutral_p or 30
+    bear_p   = bear_p   or 20
+    winner = winner_from_probs(bull_p, neutral_p, bear_p)
+    # 확률 파싱 실패 시 텍스트 파싱으로 보완
+    if bull_p == 50 and neutral_p == 30 and bear_p == 20:
+        winner = extract_winner(results.get("judge","")) or "neutral"
     cache_set(
         target_id, market["id"], target_label, results, winner,
-        bull_prob=bull_p or 50, neutral_prob=neutral_p or 30, bear_prob=bear_p or 20,
+        bull_prob=bull_p, neutral_prob=neutral_p, bear_prob=bear_p,
     )
     return results, winner
 
@@ -800,7 +969,7 @@ def display_results(results, winner, cached_at=None):
     <div style='text-align:center; padding:16px;
     background:linear-gradient(135deg,{w_color}18,transparent);
     border:2px solid {w_color}66; border-radius:10px; margin:12px 0'>
-        <div style='color:#666; font-size:11px; letter-spacing:2px; margin-bottom:6px'>가장 그럴듯한 내러티브</div>
+        <div style='color:#6b7a9e; font-size:11px; letter-spacing:2px; margin-bottom:6px'>가장 그럴듯한 내러티브</div>
         <div style='color:{w_color}; font-size:24px; font-weight:900'>{w_label}</div>
     </div>""", unsafe_allow_html=True)
 
@@ -843,13 +1012,13 @@ def display_leaderboard():
 
     # 컬럼 헤더
     h1,h2,h3,h4,h5,h6 = st.columns([0.4, 0.3, 2.2, 1.0, 2.5, 0.8])
-    h1.markdown("<span style='color:#444;font-size:11px'>순위</span>", unsafe_allow_html=True)
-    h2.markdown("<span style='color:#444;font-size:11px'>시장</span>", unsafe_allow_html=True)
-    h3.markdown("<span style='color:#444;font-size:11px'>종목/지수</span>", unsafe_allow_html=True)
-    h4.markdown("<span style='color:#444;font-size:11px'>판정</span>", unsafe_allow_html=True)
-    h5.markdown("<span style='color:#444;font-size:11px'>확률 분포</span>", unsafe_allow_html=True)
-    h6.markdown("<span style='color:#444;font-size:11px'>분석</span>", unsafe_allow_html=True)
-    st.markdown("<hr style='margin:4px 0; border-color:#1a1a2a'>", unsafe_allow_html=True)
+    h1.markdown("<span style='color:#4a5568;font-size:11px'>순위</span>", unsafe_allow_html=True)
+    h2.markdown("<span style='color:#4a5568;font-size:11px'>시장</span>", unsafe_allow_html=True)
+    h3.markdown("<span style='color:#4a5568;font-size:11px'>종목/지수</span>", unsafe_allow_html=True)
+    h4.markdown("<span style='color:#4a5568;font-size:11px'>판정</span>", unsafe_allow_html=True)
+    h5.markdown("<span style='color:#4a5568;font-size:11px'>확률 분포</span>", unsafe_allow_html=True)
+    h6.markdown("<span style='color:#4a5568;font-size:11px'>분석</span>", unsafe_allow_html=True)
+    st.markdown("<hr style='margin:4px 0; border-color:#e2e6ef'>", unsafe_allow_html=True)
 
     for rank, row in enumerate(rows, 1):
         bp = row.get("bull_prob") or 0
@@ -877,7 +1046,7 @@ def display_leaderboard():
             unsafe_allow_html=True,
         )
         c3.markdown(
-            f"<div style='color:#ccc;font-size:13px;padding-top:4px'>{row['target_label']}</div>",
+            f"<div style='color:#4a5568;font-size:13px;padding-top:4px'>{row['target_label']}</div>",
             unsafe_allow_html=True,
         )
         c4.markdown(winner_badge(w), unsafe_allow_html=False)
@@ -889,7 +1058,7 @@ def display_leaderboard():
           <div style='width:{np_}%;height:8px;background:#f5c518' title='중립 {np_}%'></div>
           <div style='width:{rp}%;height:8px;background:#ff3c4e;border-radius:0 2px 2px 0' title='약세 {rp}%'></div>
         </div>
-        <div style='display:flex;gap:8px;font-size:9px;color:#555;margin-top:2px'>
+        <div style='display:flex;gap:8px;font-size:9px;color:#6b7a9e;margin-top:2px'>
           <span style='color:#00e87a'>↑{bp}%</span>
           <span style='color:#f5c518'>→{np_}%</span>
           <span style='color:#ff3c4e'>↓{rp}%</span>
@@ -897,11 +1066,11 @@ def display_leaderboard():
         c5.markdown(bar_html, unsafe_allow_html=True)
 
         c6.markdown(
-            f"<div style='color:#333;font-size:10px;padding-top:6px'>{age_label(row['age_hours'])}</div>",
+            f"<div style='color:#374151;font-size:10px;padding-top:6px'>{age_label(row['age_hours'])}</div>",
             unsafe_allow_html=True,
         )
 
-        st.markdown("<hr style='margin:2px 0; border-color:#0d0d0d'>", unsafe_allow_html=True)
+        st.markdown("<hr style='margin:2px 0; border-color:#f0f0f0'>", unsafe_allow_html=True)
 
 # ─── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
@@ -915,12 +1084,12 @@ def main():
         <h1 style='background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);
         -webkit-background-clip:text; -webkit-text-fill-color:transparent; font-size:26px; margin:0'>
         ⚡ 시장 방향 판정 엔진</h1>
-        <p style='color:#444; font-size:11px; letter-spacing:2px; margin:2px 0 0'>
+        <p style='color:#4a5568; font-size:11px; letter-spacing:2px; margin:2px 0 0'>
         7-AGENT AI · Tavily 웹검색 + Claude 분석 · 향후 3개월 판정</p>
         """, unsafe_allow_html=True)
     with col_logout:
         key = get_user_api_key()
-        st.markdown(f"<div style='color:#333;font-size:10px;text-align:right;margin-top:6px'>🔑 ...{key[-4:]}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='color:#374151;font-size:10px;text-align:right;margin-top:6px'>🔑 ...{key[-4:]}</div>", unsafe_allow_html=True)
         if st.button("로그아웃", use_container_width=True):
             st.session_state.clear()
             st.rerun()
@@ -958,11 +1127,16 @@ def main():
         remaining = CACHE_TTL_HOURS - age_h
         with col_a:
             if st.button(f"🗄 공유 캐시 불러오기 ({remaining:.0f}시간 남음, 토큰 0 소모)", type="primary", use_container_width=True):
+                # ★ 캐시된 확률로 winner 재계산 (저장된 winner 텍스트보다 정확)
+                bp  = cached.get("bull_prob")    or 50
+                np_ = cached.get("neutral_prob") or 30
+                rp  = cached.get("bear_prob")    or 20
+                recalc_winner = winner_from_probs(bp, np_, rp)
                 st.session_state.update({
-                    "res_results": cached["results"],
-                    "res_winner":  cached.get("winner","unknown"),
+                    "res_results":   cached["results"],
+                    "res_winner":    recalc_winner,
                     "res_cached_at": cached["analyzed_at"],
-                    "show_results": True,
+                    "show_results":  True,
                 })
         with col_b:
             if st.button("🗑 재분석", use_container_width=True):
