@@ -248,58 +248,54 @@ def search_tavily(queries):
 
 def search_exa_reports(queries, recent_days=90):
     results = []
-    client = get_exa()
-    seen = set()
-    
-    # ✅ 1. 2026년 현재 시간 기준 90일 전 ISO 날짜 생성
-    start_date = (datetime.now() - timedelta(days=recent_days)).strftime("%Y-%m-%dT00:00:00.000Z")
-    
-    for q in queries:
-        try:
-            # ✅ 2. 검색 범위와 정확도 밸런스 조정
-            resp = client.search_and_contents(
-                q, 
-                num_results=5,          # 검색 결과 수를 조금 늘림
-                use_autoprompt=True,    # 자연어 쿼리 최적화
-                start_published_date=start_date, # 최근 3개월 데이터만!
-                # 💡 Tavily가 안 될 때는 범위를 너무 좁히면 결과가 0건일 수 있으므로 
-                # 도메인 제한은 선택적으로 사용하거나, 중요한 것만 포함합니다.
-                include_domains=EXA_FINANCIAL_DOMAINS, 
-                text={"max_characters": 1000} # LLM 분석용 충분한 텍스트 확보
-            )
-            
-            if not resp.results:
-                continue
+    try:
+        client = get_exa()
+        seen = set()
+        
+        # 1. 2026년 기준 90일 전 날짜 계산
+        start_date = (datetime.now() - timedelta(days=recent_days)).strftime("%Y-%m-%dT00:00:00.000Z")
+        
+        for q in queries:
+            try:
+                # ✅ 수정: include_domains를 제거하여 검색 범위를 인터넷 전체로 확장!
+                # 대신 use_autoprompt를 통해 금융 관련 고퀄리티 문서를 찾도록 유도합니다.
+                resp = client.search_and_contents(
+                    q, 
+                    num_results=5, 
+                    use_autoprompt=True,
+                    start_published_date=start_date, # 2026년 최신 정보 필터
+                    text={"max_characters": 1000}
+                )
+                
+                if not resp or not resp.results:
+                    continue
 
-            for r in resp.results:
-                url = getattr(r, "url", "") or ""
-                if not url or url in seen: continue
-                seen.add(url)
-                
-                # ✅ 3. 데이터 추출 로직 보강
-                content = getattr(r, "text", "") or ""
-                # 하이라이트가 있다면 우선 사용, 없다면 본문 상단 사용
-                hl = getattr(r, "highlights", []) or []
-                summary = " … ".join(hl) if hl else content[:800]
-                
+                for r in resp.results:
+                    url = getattr(r, "url", "") or ""
+                    if not url or url in seen: continue
+                    seen.add(url)
+                    
+                    content = getattr(r, "text", "") or ""
+                    hl = getattr(r, "highlights", []) or []
+                    summary = " … ".join(hl) if hl else content[:800]
+                    
+                    results.append({
+                        "title": getattr(r, "title", "최신 금융 리포트") or "최신 금융 리포트",
+                        "url": url,
+                        "content": summary,
+                        "date": getattr(r, "published_date", "") or ""
+                    })
+            except Exception as e:
+                # 에러 발생 시 내용을 화면에 전달하여 디버깅 지원
                 results.append({
-                    "title": getattr(r, "title", "제목 없음") or "제목 없음",
-                    "url": url,
-                    "content": summary,
-                    "date": getattr(r, "published_date", "") or ""
+                    "title": f"🚨 Exa 개별 쿼리 오류 ({q[:15]}...)", 
+                    "url": "debug", 
+                    "content": f"상세 에러: {str(e)}", 
+                    "date": datetime.now().strftime("%Y-%m-%d")
                 })
-                
-        except Exception as e:
-            # 🚨 디버깅을 위해 에러 메시지 기록 (LLM에게 전달됨)
-            error_msg = str(e)
-            print(f"Exa Query Error ({q}): {error_msg}") # 서버 로그용
-            results.append({
-                "title": f"🚨 Exa 검색 지연/오류 ({q[:20]}...)", 
-                "url": "error", 
-                "content": f"상세 원인: {error_msg}", 
-                "date": datetime.now().strftime("%Y-%m-%d")
-            })
-            
+    except Exception as e:
+        results.append({"title": "🚨 Exa 클라이언트 초기화 실패", "url": "", "content": str(e), "date": ""})
+        
     return results
 
 def search_tavily_sns(queries, market_id="sp500"):
