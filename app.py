@@ -225,88 +225,81 @@ def build_queries(target, direction, market_index, sector="", market_id="sp500")
               
     return {"tavily": tq, "exa_report": eq, "exa_sns": _build_sns_queries(target, direction, market_id)}
 
-
 # ─── SEARCH FUNCTIONS ──────────────────────────────────────────────────────────
 def search_tavily(queries):
-    client = get_tavily()
-    seen, results = set(), []
-    for q in queries:
-        try:
-            resp = client.search(q, max_results=4, search_depth="advanced", include_answer=False)
-            for r in resp.get("results", []):
-                url = r.get("url","")
-                if url in seen: continue
-                seen.add(url)
-                results.append({"title":r.get("title",""),"url":url,"content":r.get("content","")[:700],"date":r.get("published_date","")})
-        except Exception as e: 
-            # 🚨 터미널에 에러 출력
-            print(f"[Tavily 뉴스 검색 실패] 원인: {e}")
+    results = []
+    try:
+        client = get_tavily()
+        seen = set()
+        for q in queries:
+            try:
+                resp = client.search(q, max_results=4, search_depth="advanced", include_answer=False)
+                for r in resp.get("results", []):
+                    url = r.get("url","")
+                    if url in seen: continue
+                    seen.add(url)
+                    results.append({"title":r.get("title",""),"url":url,"content":r.get("content","")[:700],"date":r.get("published_date","")})
+            except Exception as e:
+                # 🚨 에러를 기사 내용인 것처럼 위장해서 LLM과 화면에 전달
+                results.append({"title": "🚨 Tavily 검색 에러", "url": "", "content": f"상세: {str(e)}", "date": datetime.now().strftime("%Y-%m-%d")})
+    except Exception as e:
+        results.append({"title": "🚨 Tavily 클라이언트 에러", "url": "", "content": str(e), "date": ""})
     return results
 
 def search_exa_reports(queries, recent_days=90):
-    client = get_exa()
-    start = (datetime.now() - timedelta(days=recent_days)).strftime("%Y-%m-%dT00:00:00.000Z")
-    seen, results = set(), []
-    
-    for q in queries:
-        try:
-            # ✅ 수정 2: Exa API 파라미터 에러 해결 (dict -> True)
-            resp = client.search_and_contents(
-                q, 
-                num_results=4, 
-                use_autoprompt=True,
-                text=True,         # 변경됨
-                highlights=True,   # 변경됨
-                start_published_date=start, 
-                include_domains=EXA_FINANCIAL_DOMAINS
-            )
-            
-            for r in resp.results:
-                url = getattr(r, "url", "") or ""
-                if not url or url in seen: continue
-                seen.add(url)
+    results = []
+    try:
+        client = get_exa()
+        seen = set()
+        
+        for q in queries:
+            try:
+                # ✅ 가장 원초적이고 안전한 형태로 호출 (에러 유발 옵션 싹 제거)
+                resp = client.search_and_contents(
+                    q, 
+                    num_results=3, 
+                    use_autoprompt=True
+                )
                 
-                hl = getattr(r, "highlights", []) or []
-                content = " … ".join(hl) if hl else (getattr(r, "text", "") or "")[:800]
-                
+                for r in resp.results:
+                    url = getattr(r, "url", "") or ""
+                    if not url or url in seen: continue
+                    seen.add(url)
+                    
+                    hl = getattr(r, "highlights", []) or []
+                    content = " … ".join(hl) if hl else (getattr(r, "text", "") or "")[:800]
+                    
+                    results.append({
+                        "title": getattr(r, "title", "") or "",
+                        "url": url,
+                        "content": content[:800],
+                        "date": getattr(r, "published_date", "") or ""
+                    })
+            except Exception as e:
+                # 🚨 Exa 에러를 기사 내용인 것처럼 위장!
                 results.append({
-                    "title": getattr(r, "title", "") or "",
-                    "url": url,
-                    "content": content[:800],
-                    "date": getattr(r, "published_date", "") or ""
+                    "title": f"🚨 Exa API 에러 ({q})", 
+                    "url": "디버그 모드", 
+                    "content": f"에러 상세 내용: {str(e)}", 
+                    "date": datetime.now().strftime("%Y-%m-%d")
                 })
-        except Exception as e:
-            # 🚨 터미널에 에러 출력 (Exa 잔액이 깎이지 않는 진짜 이유를 여기서 확인 가능)
-            print(f"[Exa 리포트 검색 실패] 쿼리: {q} \n에러 상세: {e}")
-            
+    except Exception as e:
+        results.append({"title": "🚨 Exa 클라이언트 초기화 에러", "url": "", "content": str(e), "date": ""})
+        
     return results
 
 def search_tavily_sns(queries, market_id="sp500"):
-    client = get_tavily()
-    seen, results = set(), []
-    domains = _get_sns_domains(market_id)
-    for q in queries:
-        try:
-            resp = client.search(q, max_results=5, search_depth="advanced", include_domains=domains)
-            for r in resp.get("results",[]):
-                url = r.get("url") or ""
-                if url in seen: continue
-                seen.add(url)
-                results.append({
-                    "title": r.get("title") or "",
-                    "url": url,
-                    "content": (r.get("content") or "")[:600],
-                    "date": r.get("published_date") or "",
-                    "platform": _detect_platform(url)
-                })
-        except Exception as e:
-            print(f"[Tavily SNS 고급검색 실패] {e}")
-            # fallback basic search
+    results = []
+    try:
+        client = get_tavily()
+        seen = set()
+        domains = _get_sns_domains(market_id)
+        for q in queries:
             try:
-                resp2 = client.search(q, max_results=4, search_depth="basic")
-                for r in resp2.get("results",[]):
+                resp = client.search(q, max_results=4, search_depth="basic") # 에러 방지를 위해 basic으로 통일
+                for r in resp.get("results",[]):
                     url = r.get("url") or ""
-                    if url in seen or not any(d in url for d in ["reddit","stocktwits","naver","minkabu","kabutan"]): continue
+                    if url in seen: continue
                     seen.add(url)
                     results.append({
                         "title": r.get("title") or "",
@@ -315,8 +308,10 @@ def search_tavily_sns(queries, market_id="sp500"):
                         "date": r.get("published_date") or "",
                         "platform": _detect_platform(url)
                     })
-            except Exception as e2: 
-                print(f"[Tavily SNS 기본검색 실패] {e2}")
+            except Exception as e:
+                results.append({"title": "🚨 Tavily SNS 에러", "url": "", "content": f"상세: {str(e)}", "date": datetime.now().strftime("%Y-%m-%d")})
+    except Exception as e:
+        results.append({"title": "🚨 Tavily SNS 클라이언트 에러", "url": "", "content": str(e), "date": ""})
     return results
 
 def fetch_current_price(target, ticker_raw, market_id):
@@ -337,7 +332,7 @@ def fetch_current_price(target, ticker_raw, market_id):
                 d = (r.get("published_date") or "")[:10]
                 if c: snippets.append(f"■ {r.get('title','')} ({d})\n  {r.get('url','')}\n  {c}")
         except Exception as e: 
-            print(f"[현재가 검색 실패] {e}")
+            snippets.append(f"🚨 현재가 검색 에러: {str(e)}")
             
     if not snippets: return "[현재가 검색 실패]"
     return f"【현재 주가 ({datetime.now().strftime('%Y-%m-%d %H:%M')})】\n" + "\n\n".join(snippets)
