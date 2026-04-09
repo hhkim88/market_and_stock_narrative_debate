@@ -1,6 +1,7 @@
 import streamlit as st
 import anthropic
 import re
+import threading
 from datetime import datetime, timezone, timedelta
 from supabase import create_client
 from tavily import TavilyClient
@@ -765,13 +766,16 @@ def cache_get(target_id: str):
         resp = get_supabase().table("analyses").select("*").eq("target_id", target_id).execute()
         if not resp.data: return None
         row = resp.data[0]
+        # running 상태는 TTL 무관하게 반환 (진행 중 표시 위해)
+        if row.get("status") == "running":
+            return row
         at  = datetime.fromisoformat(row["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
         if (datetime.now(timezone.utc) - at).total_seconds() / 3600 > CACHE_TTL_HOURS:
             return None
         return row
     except: return None
 
-def cache_set(target_id, market_id, target_label, results, winner, bull_prob=50, neutral_prob=30, bear_prob=20):
+def cache_set(target_id, market_id, target_label, results, winner, bull_prob=50, neutral_prob=30, bear_prob=20, status="done"):
     try:
         get_supabase().table("analyses").upsert({
             "target_id": target_id, "market_id": market_id,
@@ -780,10 +784,25 @@ def cache_set(target_id, market_id, target_label, results, winner, bull_prob=50,
             "bull_prob": bull_prob,
             "neutral_prob": neutral_prob,
             "bear_prob": bear_prob,
+            "status": status,
             "analyzed_at": datetime.now(timezone.utc).isoformat(),
         }, on_conflict="target_id").execute()
     except Exception as e:
-        st.warning(f"캐시 저장 오류: {e}")
+        print(f"캐시 저장 오류: {e}")   # 백그라운드 스레드에서는 st.warning 사용 불가
+
+# 백그라운드 스레드에서 API 키를 전달하기 위한 thread-safe 딕셔너리
+_BG_KEYS: dict = {}
+
+def cache_set_running(target_id, market_id, target_label):
+    """분석 시작 시 'running' 상태를 DB에 기록 — 다른 사용자도 진행 중임을 알 수 있음"""
+    try:
+        get_supabase().table("analyses").upsert({
+            "target_id": target_id, "market_id": market_id,
+            "target_label": target_label,
+            "results": {}, "winner": "", "status": "running",
+            "analyzed_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="target_id").execute()
+    except: pass
 
 def cache_delete(target_id):
     try: get_supabase().table("analyses").delete().eq("target_id", target_id).execute()
@@ -920,8 +939,8 @@ def build_system_prompts(market: dict, stock: tuple = None):
     }
 
 # ─── CLAUDE API ────────────────────────────────────────────────────────────────
-def call_claude(system: str, user_content: str, max_tokens: int = 4000) -> str:
-    api_key = get_user_api_key()
+def call_claude(system: str, user_content: str, max_tokens: int = 4000, _target_id: str = '') -> str:
+    api_key = get_user_api_key() or next(iter(_BG_KEYS.values()), '')
     if not api_key:
         raise RuntimeError("로그인이 필요합니다.")
     client = anthropic.Anthropic(api_key=api_key)
@@ -966,7 +985,7 @@ def age_label(hours):
     return f"{int(hours/24)}일 전"
 
 # ─── RUN ANALYSIS ──────────────────────────────────────────────────────────────
-def run_analysis(target_id, target_label, market, stock, prompts):
+def _run_analysis_core(target_id, target_label, market, stock, prompts, user_api_key):
     results  = {}
     progress = st.progress(0)
     status   = st.empty()
@@ -1072,6 +1091,7 @@ def run_analysis(target_id, target_label, market, stock, prompts):
     cache_set(
         target_id, market["id"], target_label, results, winner,
         bull_prob=bull_p, neutral_prob=neutral_p, bear_prob=bear_p,
+        status="done",
     )
     return results, winner
 
@@ -1241,40 +1261,82 @@ def main():
     col_a, col_b = st.columns([3,1])
 
     if cached:
-        at = datetime.fromisoformat(cached["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
-        age_h = (datetime.now(timezone.utc) - at).total_seconds() / 3600
-        remaining = CACHE_TTL_HOURS - age_h
-        with col_a:
-            if st.button(f"🗄 공유 캐시 불러오기 ({remaining:.0f}시간 남음, 토큰 0 소모)", type="primary", use_container_width=True):
-                # ★ 캐시된 확률로 winner 재계산 (저장된 winner 텍스트보다 정확)
-                bp  = cached.get("bull_prob")    or 50
-                np_ = cached.get("neutral_prob") or 30
-                rp  = cached.get("bear_prob")    or 20
-                recalc_winner = winner_from_probs(bp, np_, rp)
-                st.session_state.update({
-                    "res_results":   cached["results"],
-                    "res_winner":    recalc_winner,
-                    "res_cached_at": cached["analyzed_at"],
-                    "show_results":  True,
-                })
-        with col_b:
-            if st.button("🗑 재분석", use_container_width=True):
-                cache_delete(target_id)
-                st.session_state.pop("show_results", None)
-                st.success("캐시 삭제. 아래 버튼으로 재분석하세요.")
-                st.rerun()
+        status = cached.get("status", "done")
+
+        if status == "running":
+            # ── 백그라운드 실행 중 ──────────────────────────────────────────
+            at = datetime.fromisoformat(cached["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
+            elapsed = int((datetime.now(timezone.utc) - at).total_seconds() / 60)
+            st.info(
+                f"⏳ **{target_label} 분석이 백그라운드에서 실행 중입니다** "
+                f"({elapsed}분 경과)\n\n"
+                f"브라우저를 닫아도 서버에서 계속 진행됩니다. "
+                f"이 페이지를 30초 후 새로고침하면 진행 상황을 확인할 수 있습니다."
+            )
+            col_r, col_c = st.columns([1, 1])
+            with col_r:
+                if st.button("🔄 새로고침 (결과 확인)", use_container_width=True):
+                    st.rerun()
+            with col_c:
+                if elapsed > 20 and st.button("⚠️ 실패로 간주하고 재시작", use_container_width=True):
+                    cache_delete(target_id)
+                    st.rerun()
+            # 30초마다 자동 새로고침
+            import time as _time
+            _time.sleep(1)
+            st.rerun()
+
+        else:
+            # ── 완료된 캐시 ─────────────────────────────────────────────────
+            at = datetime.fromisoformat(cached["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
+            age_h = (datetime.now(timezone.utc) - at).total_seconds() / 3600
+            remaining = CACHE_TTL_HOURS - age_h
+            with col_a:
+                if st.button(f"🗄 공유 캐시 불러오기 ({remaining:.0f}시간 남음, 토큰 0 소모)", type="primary", use_container_width=True):
+                    bp  = cached.get("bull_prob")    or 50
+                    np_ = cached.get("neutral_prob") or 30
+                    rp  = cached.get("bear_prob")    or 20
+                    recalc_winner = winner_from_probs(bp, np_, rp)
+                    st.session_state.update({
+                        "res_results":   cached["results"],
+                        "res_winner":    recalc_winner,
+                        "res_cached_at": cached["analyzed_at"],
+                        "show_results":  True,
+                    })
+            with col_b:
+                if st.button("🗑 재분석", use_container_width=True):
+                    cache_delete(target_id)
+                    st.session_state.pop("show_results", None)
+                    st.success("캐시 삭제. 아래 버튼으로 재분석하세요.")
+                    st.rerun()
     else:
         with col_a:
             if st.button(f"▶ {target_label} 분석 시작", type="primary", use_container_width=True):
                 st.session_state.pop("show_results", None)
+                api_key = get_user_api_key()
                 prompts = build_system_prompts(market, stock)
-                results, winner = run_analysis(target_id, target_label, market, stock, prompts)
-                st.session_state.update({
-                    "res_results":   results,
-                    "res_winner":    winner,
-                    "res_cached_at": None,
-                    "show_results":  True,
-                })
+                # DB에 "실행 중" 상태 선점 기록
+                cache_set_running(target_id, market["id"], target_label)
+                # 백그라운드 스레드로 실행 — 브라우저 꺼도 계속 진행
+                def _bg_task():
+                    import streamlit as _st
+                    # 스레드에서 session_state 접근 불가 → API 키를 클로저로 전달
+                    # call_claude 내부에서 _bg_api_key를 참조하도록 임시 저장
+                    try:
+                        import contextvars
+                    except: pass
+                    # API 키를 전역 딕셔너리로 전달 (스레드 안전)
+                    _BG_KEYS[target_id] = api_key
+                    try:
+                        _run_analysis_core(target_id, target_label, market, stock, prompts, api_key)
+                    except Exception as e:
+                        print(f"백그라운드 분석 오류 [{target_id}]: {e}")
+                    finally:
+                        _BG_KEYS.pop(target_id, None)
+
+                t = threading.Thread(target=_bg_task, daemon=True)
+                t.start()
+                st.session_state["bg_running"] = target_id
                 st.rerun()
 
     if st.session_state.get("show_results"):
