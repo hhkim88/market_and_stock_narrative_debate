@@ -9,7 +9,7 @@ from tavily import TavilyClient
 from exa_py import Exa
 
 # ─── PAGE CONFIG ───────────────────────────────────────────────────────────────
-st.set_page_config(page_title="시장 방향 판정 엔진", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="시장 및 종목 내러티브 분석 엔진", page_icon="⚡", layout="wide")
 
 st.markdown("""
 <style>
