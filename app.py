@@ -542,17 +542,38 @@ def load_leaderboard():
     except: return []
 
 # ─── PROMPT BUILDERS ───────────────────────────────────────────────────────────
+# ─── PROMPT BUILDERS ───────────────────────────────────────────────────────────
 def build_system_prompts(market, stock=None):
     idx = market["index"]
     cb  = market["central_bank"]
-    kr  = "**CRITICAL: Write your ENTIRE response in Korean (한국어).**"
     target = f"{stock[1]} ({stock[0]})" if stock else idx
     sn = f" (섹터: {stock[2]}, {idx} 상장)" if stock else ""
+
+    # ✅ 핵심: 시장별 현지 언어로 페르소나를 부여하여 해당 언어의 뉴런(추론 능력)을 극대화합니다.
+    # 단, UI 출력을 위해 최종 아웃풋은 반드시 한국어(Korean)로 고정합니다.
+    if market["id"] == "sp500":
+        lang_instruction = (
+            f"You are a top-tier Wall Street investment analyst. "
+            f"You must deeply analyze the provided English financial reports, Reddit/StockTwits sentiment, and earnings calls in English to capture the exact market nuances. "
+            f"However, **YOUR ENTIRE FINAL OUTPUT MUST BE TRANSLATED TO AND WRITTEN IN KOREAN (한국어)** following the exact Korean headers provided below."
+        )
+    elif market["id"] == "nikkei225":
+        lang_instruction = (
+            f"あなたは日本市場の専門アナリストです。"
+            f"提供された日本語のニュース、みんかぶや株探の掲示板の意見、決算情報を日本語のまま深く分析し、日本市場特有の細かいニュアンスを正確に把握してください。"
+            f"ただし、**最終的な出力はすべて韓国語（한국어）で翻訳して作成**し、以下の韓国語の見出しに必ず従ってください。"
+        )
+    else:  # kospi200
+        lang_instruction = (
+            f"당신은 여의도 최고의 한국 시장 전문 애널리스트입니다. "
+            f"주어진 한국어 뉴스, 네이버 종토방 여론, 실적발표 자료를 바탕으로 시장의 숨겨진 의도와 방향성을 깊이 있게 분석하십시오. "
+            f"**모든 출력은 한국어**로 작성하십시오."
+        )
 
     base_warn = "\n⚠️ 검색 결과에 없는 주가·목표가·손절가를 절대 만들어내지 말 것. 수치는 출처가 있는 것만 인용."
 
     return {
-        "bull": f"""You are a research analyst compiling REAL bullish narratives about {target}{sn}. {kr}
+        "bull": f"""{lang_instruction}
 ## 📈 {target} 강세 내러티브 수집 (향후 3개월)
 ### 주요 강세론자 및 기관 [실명·기관명·목표가 포함]
 ### 지배적인 강세 스토리라인 [누가, 왜, 어떤 근거로]
@@ -563,7 +584,7 @@ def build_system_prompts(market, stock=None):
 ### 강세 내러티브 3줄 요약
 출처(기관명, 날짜, URL)를 반드시 명시하시오.{base_warn}""",
 
-        "neutral": f"""You are a research analyst compiling REAL neutral narratives about {target}{sn}. {kr}
+        "neutral": f"""{lang_instruction}
 ## ➡️ {target} 중립 내러티브 수집 (향후 3개월)
 ### 주요 중립론자 및 기관
 ### 지배적인 중립 스토리라인
@@ -574,7 +595,7 @@ def build_system_prompts(market, stock=None):
 ### 중립 내러티브 3줄 요약
 출처를 반드시 명시하시오.{base_warn}""",
 
-        "bear": f"""You are a research analyst compiling REAL bearish narratives about {target}{sn}. {kr}
+        "bear": f"""{lang_instruction}
 ## 📉 {target} 약세 내러티브 수집 (향후 3개월)
 ### 주요 약세론자 및 기관
 ### 지배적인 약세 스토리라인
@@ -585,7 +606,8 @@ def build_system_prompts(market, stock=None):
 ### 약세 내러티브 3줄 요약
 출처를 반드시 명시하시오.{base_warn}""",
 
-        "bull_critic": f"""You are an adversarial analyst stress-testing bullish narratives about {target}. {kr}
+        "bull_critic": f"""{lang_instruction}
+You are an adversarial analyst stress-testing bullish narratives.
 ## 🔥 강세 내러티브 비판
 ### 근거의 취약점 [데이터 오독, 체리피킹]
 ### 강세가 외면한 반대 증거
@@ -593,7 +615,8 @@ def build_system_prompts(market, stock=None):
 ### 향후 3개월 강세 붕괴 리스크
 ### 강세 신뢰도 [1-10점 및 2줄 평가]""",
 
-        "neutral_critic": f"""You are an adversarial analyst stress-testing neutral narratives about {target}. {kr}
+        "neutral_critic": f"""{lang_instruction}
+You are an adversarial analyst stress-testing neutral narratives.
 ## 🔥 중립 내러티브 비판
 ### 거짓 균형의 함정
 ### 중립이 외면한 방향성 신호
@@ -601,7 +624,8 @@ def build_system_prompts(market, stock=None):
 ### 방향성 강제 촉매
 ### 중립 신뢰도 [1-10점 및 2줄 평가]""",
 
-        "bear_critic": f"""You are an adversarial analyst stress-testing bearish narratives about {target}. {kr}
+        "bear_critic": f"""{lang_instruction}
+You are an adversarial analyst stress-testing bearish narratives.
 ## 🔥 약세 내러티브 비판
 ### 과거 패턴 오남용
 ### 약세가 외면한 회복력 근거
@@ -609,7 +633,8 @@ def build_system_prompts(market, stock=None):
 ### 과소평가한 정책 대응 [{cb}]
 ### 약세 신뢰도 [1-10점 및 2줄 평가]""",
 
-        "judge": f"""You are a Chief Investment Strategist reviewing a 6-agent debate about {target}. {kr}
+        "judge": f"""{lang_instruction}
+You are the Chief Investment Strategist reviewing a 6-agent debate.
 
 ⚠️ 절대 금지:
 - 【실시간 현재가】에 없는 주가 수치를 만들어내지 말 것
