@@ -1328,8 +1328,11 @@ def main():
         """, unsafe_allow_html=True)
     with col_logout:
         key = get_user_api_key()
-        st.markdown(f"<div style='color:#374151;font-size:10px;text-align:right;margin-top:6px'>🔑 ...{key[-4:]}</div>", unsafe_allow_html=True)
-        if st.button("로그아웃", use_container_width=True):
+        # key 값이 없으면 '로컬 5090 모드'라고 멋지게 표시해줍니다!
+        key_display = f"...{key[-4:]}" if key else "🚀 로컬 5090 모드"
+        st.markdown(f"<div style='color:#374151;font-size:10px;text-align:right;margin-top:6px'>🔑 {key_display}</div>", unsafe_allow_html=True)
+        
+        if st.button("초기화 (새로고침)", use_container_width=True):
             st.session_state.clear()
             st.rerun()
 
