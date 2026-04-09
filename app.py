@@ -45,16 +45,14 @@ CACHE_TTL_HOURS = 48
 # ─── 로컬 LLM 설정 ──────────────────────────────────────────────────────────────
 # ngrok URL은 Streamlit Secrets에서 관리 (재시작마다 바뀌므로)
 # secrets.toml: OLLAMA_URL = "https://xxx.ngrok-free.app"
-#   OLLAMA_MODEL_KOSPI   = "qwen2.5:72b"    # 한국 시장 — 한국어 최강
-#   OLLAMA_MODEL_SP500   = "llama3.3:70b"   # 미국 시장 — 영어 강점
-#   OLLAMA_MODEL_NIKKEI  = "gemma3:27b"     # 일본 시장 — 기본값
+
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 
 # 시장별 기본 모델 (secrets 미설정 시 fallback)
 DEFAULT_MODELS = {
-    "kospi200":   "qwen2.5:72b",
-    "sp500":      "llama3.3:70b",
-    "nikkei225":  "gemma3:27b",
+    "kospi200":   "qwen2.5:32b",     # 한국어 1티어, VRAM에 완벽히 들어감
+    "sp500":      "gemma3:27b",      # (또는 qwen2.5:32b) 영어 추론 능력 최상급
+    "nikkei225":  "gemma3:27b",      # 일본어/다국어 능력이 매우 뛰어남
 }
 
 def get_ollama_url() -> str:
