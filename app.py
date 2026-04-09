@@ -162,13 +162,14 @@ def _get_sns_domains(market_id: str) -> list[str]:
         return ["reddit.com","stocktwits.com","x.com","twitter.com"]
 
 def _build_sns_queries(target: str, direction: str, market_id: str, year: int) -> list[str]:
-    dir_en = {"bull":"bullish buy positive","neutral":"hold wait uncertain","bear":"bearish sell risk"}[direction]
+    # ✅ 수정 1: SNS 검색어를 대폭 간소화하여 검색 히트율을 극대화합니다.
+    dir_en = "bullish" if direction == "bull" else ("bearish" if direction == "bear" else "outlook")
     if market_id == "kospi200":
-        return [f"{target} 주식 투자자 반응 커뮤니티 종토방 {year}", f"{target} 매수 매도 개인투자자 여론 {year}"]
+        return [f"{target} 주식 종토방", f"{target} 매수 매도 여론"]
     elif market_id == "nikkei225":
-        return [f"{target} 株 投資家 掲示板 みんかぶ {year}", f"{target} 株価 個人投資家 口コミ {year}"]
+        return [f"{target} 株 掲示板", f"{target} 個人投資家"]
     else:
-        return [f"{target} stock {dir_en} investors Reddit StockTwits {year}", f"{target} stock sentiment community {year}"]
+        return [f"{target} stock {dir_en} reddit", f"{target} stock retail sentiment"]
 
 def _detect_platform(url: str) -> str:
     if "reddit.com" in url: return "Reddit"
@@ -262,36 +263,51 @@ def search_tavily_sns(queries, market_id="sp500"):
         try:
             resp = client.search(q, max_results=5, search_depth="advanced", include_domains=domains)
             for r in resp.get("results",[]):
-                url = r.get("url","")
+                url = r.get("url") or ""
                 if url in seen: continue
                 seen.add(url)
-                results.append({"title":r.get("title",""),"url":url,"content":r.get("content","")[:600],"date":r.get("published_date",""),"platform":_detect_platform(url)})
+                results.append({
+                    "title": r.get("title") or "",
+                    "url": url,
+                    "content": (r.get("content") or "")[:600],
+                    "date": r.get("published_date") or "", # 🚨 빈 값(None) 방어
+                    "platform": _detect_platform(url)
+                })
         except:
             try:
                 resp2 = client.search(q, max_results=4, search_depth="basic")
                 for r in resp2.get("results",[]):
-                    url = r.get("url","")
+                    url = r.get("url") or ""
                     if url in seen or not any(d in url for d in ["reddit","stocktwits","naver","minkabu","kabutan"]): continue
                     seen.add(url)
-                    results.append({"title":r.get("title",""),"url":url,"content":r.get("content","")[:600],"date":r.get("published_date",""),"platform":_detect_platform(url)})
+                    results.append({
+                        "title": r.get("title") or "",
+                        "url": url,
+                        "content": (r.get("content") or "")[:600],
+                        "date": r.get("published_date") or "", # 🚨 빈 값 방어
+                        "platform": _detect_platform(url)
+                    })
             except: pass
     return results
 
 def fetch_current_price(target, ticker_raw, market_id):
     client = get_tavily()
+    # ✅ 수정 2: 현재가 검색어도 군더더기 없이 심플하게 바꿉니다.
     if market_id == "kospi200":
-        queries = [f"{target} 현재 주가 오늘 {ticker_raw} 코스피"] if ticker_raw else ["KOSPI 200 지수 현재"]
+        queries = [f"{target} 현재 주가", f"{ticker_raw} 주가 추이"]
     elif market_id == "nikkei225":
-        queries = [f"{target} 株価 現在 今日 {ticker_raw}"] if ticker_raw else ["日経225 現在値"]
+        queries = [f"{target} 株価 現在", f"{ticker_raw} 株価"]
     else:
-        queries = [f"{target} stock price today {ticker_raw}"] if ticker_raw else ["S&P 500 current level"]
+        queries = [f"{target} stock current price", f"{ticker_raw} stock price today"]
+        
     snippets = []
-    for q in queries[:2]:
+    for q in queries:
         try:
             resp = client.search(q, max_results=3, search_depth="basic")
             for r in resp.get("results",[]):
-                c = r.get("content","")[:300]
-                if c: snippets.append(f"■ {r.get('title','')} ({r.get('published_date','')[:10]})\n  {r.get('url','')}\n  {c}")
+                c = (r.get("content") or "")[:300]
+                d = (r.get("published_date") or "")[:10] # 🚨 빈 값일 때 에러나는 버그 차단
+                if c: snippets.append(f"■ {r.get('title','')} ({d})\n  {r.get('url','')}\n  {c}")
         except: pass
     if not snippets: return "[현재가 검색 실패]"
     return f"【현재 주가 ({datetime.now().strftime('%Y-%m-%d %H:%M')})】\n" + "\n\n".join(snippets)
@@ -395,7 +411,6 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
     sr = search_tavily_sns(qs["exa_sns"], market_id=market_id)
     et = fetch_earnings_transcript(ticker_raw, target_name=target, market_id=market_id) if ticker_raw else "[지수 — 어닝콜 해당 없음]"
 
-    # ✅ 90일(3개월) 커트라인 문자열 생성 (예: "2026-01-09")
     cutoff_str = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
 
     def fmt(items, label, show_p=False):
@@ -404,15 +419,16 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
         valid_count = 0
         
         for r in items:
-            date_str = r.get("date", "")
-            # 🚨 핵심: 날짜가 존재하고, 그 날짜가 커트라인(90일 전)보다 과거라면 아예 LLM에게 주지 않습니다.
+            date_str = r.get("date") or ""  # 🚨 수정 3: 빈 값일 때 문자열 길이를 재서 발생하는 에러 완벽 차단
+            
+            # 날짜가 있고 90일보다 오래된 데이터면 버립니다. (날짜가 없으면 일단 통과시킵니다)
             if date_str and len(date_str) >= 10 and date_str[:10] < cutoff_str:
                 continue 
 
             valid_count += 1
-            ds=f" ({date_str[:10]})" if date_str else ""
-            pl=f"[{r.get('platform','')}] " if show_p and r.get("platform") else ""
-            lines.append(f"■ {pl}{r['title']}{ds}")
+            ds = f" ({date_str[:10]})" if date_str else ""
+            pl = f"[{r.get('platform','')}] " if show_p and r.get("platform") else ""
+            lines.append(f"■ {pl}{r.get('title','')}{ds}")
             if r.get("url"): lines.append(f"  {r['url']}")
             if r.get("content"): lines.append(f"  {r['content']}")
             lines.append("")
