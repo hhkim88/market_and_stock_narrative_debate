@@ -880,6 +880,15 @@ def load_leaderboard():
         return rows
     except: return []
 
+def strip_duplicate_translation(text: str) -> str:
+    markers = ["번역 (한국어):", "번역:", "Translation:", "Translated version:"]
+    for m in markers:
+        if m in text:
+            parts = text.split(m)
+            # 보통 뒤쪽이 한국어 최종본일 가능성이 큼
+            return parts[-1].strip()
+    return text.strip()
+    
 # ─── PROMPT BUILDERS ───────────────────────────────────────────────────────────
 # ─── PROMPT BUILDERS ───────────────────────────────────────────────────────────
 def build_system_prompts(market, stock=None):
@@ -899,7 +908,10 @@ def build_system_prompts(market, stock=None):
             f"You are a top-tier Wall Street investment analyst. "
             f"You must deeply analyze the provided English financial reports, Reddit/StockTwits sentiment, and earnings calls in English to capture the exact market nuances. "
             f"🚨 CRITICAL RULE: Strictly ignore any data, target prices, ratings, or news older than 3 months (before {cutoff_str_en}). Only use the most recent information. "
-            f"However, **YOUR ENTIRE FINAL OUTPUT MUST BE TRANSLATED TO AND WRITTEN IN KOREAN (한국어)** following the exact Korean headers provided below."
+            f"Final answer must be written ONLY in Korean. "
+            f"Do NOT output English first. "
+            f"Do NOT include a separate translation section. "
+            f"Do NOT repeat the same content in multiple languages."
         )
     elif market["id"] == "nikkei225":
         lang_instruction = (
@@ -954,6 +966,9 @@ def build_system_prompts(market, stock=None):
 
         "bull_critic": f"""{lang_instruction}
 You are an adversarial analyst stress-testing bullish narratives.
+Output only one final Korean version.
+Do not include English source text.
+Do not add '번역' or 'Translation' sections.
 ## 🔥 강세 내러티브 비판
 ### 근거의 취약점 [데이터 오독, 과거 데이터 사용 여부]
 ### 강세가 외면한 반대 증거
@@ -963,6 +978,9 @@ You are an adversarial analyst stress-testing bullish narratives.
 
         "neutral_critic": f"""{lang_instruction}
 You are an adversarial analyst stress-testing neutral narratives.
+Output only one final Korean version.
+Do not include English source text.
+Do not add '번역' or 'Translation' sections.
 ## 🔥 중립 내러티브 비판
 ### 거짓 균형의 함정
 ### 중립이 외면한 방향성 신호
@@ -972,6 +990,9 @@ You are an adversarial analyst stress-testing neutral narratives.
 
         "bear_critic": f"""{lang_instruction}
 You are an adversarial analyst stress-testing bearish narratives.
+Output only one final Korean version.
+Do not include English source text.
+Do not add '번역' or 'Translation' sections.
 ## 🔥 약세 내러티브 비판
 ### 과거 패턴 오남용
 ### 약세가 외면한 회복력 근거
@@ -981,6 +1002,9 @@ You are an adversarial analyst stress-testing bearish narratives.
 
         "judge": f"""{lang_instruction}
 You are the Chief Investment Strategist reviewing a 6-agent debate.
+Output only one final Korean version.
+Do not include English source text.
+Do not add '번역' or 'Translation' sections.
 
 ⚠️ 절대 금지:
 - 【실시간 현재가】에 없는 주가 수치 조작 금지
@@ -1068,7 +1092,9 @@ def _run_analysis_core(target_id, target_label, market, stock, prompts):
                 f"{target_label} 검색 결과입니다:\n\n{search_results}\n\n"
                 f"위 결과를 바탕으로 {dir_label} 내러티브를 수집·정리하십시오."
             )
-            results[agent] = call_llm(prompts[agent], user_content, market_id=market["id"])
+            # results[agent] = call_llm(prompts[agent], user_content, market_id=market["id"])
+            raw = call_llm(prompts[agent], user_content, market_id=market["id"])
+            results[agent] = strip_duplicate_translation(raw)
         except Exception as e:
             results[agent] = f"⚠️ 오류: {e}"
 
@@ -1081,7 +1107,9 @@ def _run_analysis_core(target_id, target_label, market, stock, prompts):
         update_progress(target_id, pct, f"🔥 {AGENT_LABELS[agent]} — 비판 중...")
         try:
             user_content = f"[{label} 내러티브]:\n{results.get(src,'')}\n\n위 내러티브를 냉정하게 비판하시오."
-            results[agent] = call_llm(prompts[agent], user_content, market_id=market["id"])
+            # results[agent] = call_llm(prompts[agent], user_content, market_id=market["id"])
+            raw = call_llm(prompts[agent], user_content, market_id=market["id"])
+            results[agent] = strip_duplicate_translation(raw)
         except Exception as e:
             results[agent] = f"⚠️ 오류: {e}"
 
