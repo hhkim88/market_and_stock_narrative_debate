@@ -194,8 +194,9 @@ FMP_TICKER_MAP = {
 }
 
 # ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
+# ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
 def build_queries(target, direction, market_index, sector="", market_id="sp500"):
-    # ✅ 수정 2: datetime, year, month 관련 변수 완전 삭제
+    # ✅ 수정 1: 검색어에서 year, month를 제거하여 검색 엔진의 자유도를 높임
     sn = f" {sector}" if sector else ""
     
     if direction == "bull":
@@ -222,8 +223,8 @@ def build_queries(target, direction, market_index, sector="", market_id="sp500")
               f"Expert column {target} overvalued headwinds",
               f"{target}{sn} structural decline disruption analysis"]
               
-    # ✅ 수정 3: _build_sns_queries 호출 시 year 인자 제거
     return {"tavily": tq, "exa_report": eq, "exa_sns": _build_sns_queries(target, direction, market_id)}
+
 
 # ─── SEARCH FUNCTIONS ──────────────────────────────────────────────────────────
 def search_tavily(queries):
@@ -238,25 +239,24 @@ def search_tavily(queries):
                 seen.add(url)
                 results.append({"title":r.get("title",""),"url":url,"content":r.get("content","")[:700],"date":r.get("published_date","")})
         except Exception as e: 
-            # 조용히 넘어가지 않고 터미널에 에러 원인 출력
-            print(f"[Tavily 검색 실패] {e}")
+            # 🚨 터미널에 에러 출력
+            print(f"[Tavily 뉴스 검색 실패] 원인: {e}")
     return results
 
 def search_exa_reports(queries, recent_days=90):
     client = get_exa()
-    # Exa API가 요구하는 ISO 8601 포맷
     start = (datetime.now() - timedelta(days=recent_days)).strftime("%Y-%m-%dT00:00:00.000Z")
     seen, results = set(), []
     
     for q in queries:
         try:
-            # ✅ 수정 1: 에러를 유발할 수 있는 복잡한 딕셔너리(dict) 파라미터를 가장 안전한 True 모드로 변경
+            # ✅ 수정 2: Exa API 파라미터 에러 해결 (dict -> True)
             resp = client.search_and_contents(
                 q, 
                 num_results=4, 
                 use_autoprompt=True,
-                text=True,         # 텍스트 전체 가져오기 허용
-                highlights=True,   # 하이라이트 요약 가져오기 허용
+                text=True,         # 변경됨
+                highlights=True,   # 변경됨
                 start_published_date=start, 
                 include_domains=EXA_FINANCIAL_DOMAINS
             )
@@ -276,8 +276,8 @@ def search_exa_reports(queries, recent_days=90):
                     "date": getattr(r, "published_date", "") or ""
                 })
         except Exception as e:
-            # 🚨 수정 2: 에러가 나면 무시하지 않고 터미널에 정확한 이유를 출력합니다.
-            print(f"[Exa API 실패] 쿼리: {q} \n에러 상세: {e}")
+            # 🚨 터미널에 에러 출력 (Exa 잔액이 깎이지 않는 진짜 이유를 여기서 확인 가능)
+            print(f"[Exa 리포트 검색 실패] 쿼리: {q} \n에러 상세: {e}")
             
     return results
 
@@ -296,10 +296,12 @@ def search_tavily_sns(queries, market_id="sp500"):
                     "title": r.get("title") or "",
                     "url": url,
                     "content": (r.get("content") or "")[:600],
-                    "date": r.get("published_date") or "", # 🚨 빈 값(None) 방어
+                    "date": r.get("published_date") or "",
                     "platform": _detect_platform(url)
                 })
-        except:
+        except Exception as e:
+            print(f"[Tavily SNS 고급검색 실패] {e}")
+            # fallback basic search
             try:
                 resp2 = client.search(q, max_results=4, search_depth="basic")
                 for r in resp2.get("results",[]):
@@ -310,15 +312,15 @@ def search_tavily_sns(queries, market_id="sp500"):
                         "title": r.get("title") or "",
                         "url": url,
                         "content": (r.get("content") or "")[:600],
-                        "date": r.get("published_date") or "", # 🚨 빈 값 방어
+                        "date": r.get("published_date") or "",
                         "platform": _detect_platform(url)
                     })
-            except: pass
+            except Exception as e2: 
+                print(f"[Tavily SNS 기본검색 실패] {e2}")
     return results
 
 def fetch_current_price(target, ticker_raw, market_id):
     client = get_tavily()
-    # ✅ 수정 2: 현재가 검색어도 군더더기 없이 심플하게 바꿉니다.
     if market_id == "kospi200":
         queries = [f"{target} 현재 주가", f"{ticker_raw} 주가 추이"]
     elif market_id == "nikkei225":
@@ -332,13 +334,16 @@ def fetch_current_price(target, ticker_raw, market_id):
             resp = client.search(q, max_results=3, search_depth="basic")
             for r in resp.get("results",[]):
                 c = (r.get("content") or "")[:300]
-                d = (r.get("published_date") or "")[:10] # 🚨 빈 값일 때 에러나는 버그 차단
+                d = (r.get("published_date") or "")[:10]
                 if c: snippets.append(f"■ {r.get('title','')} ({d})\n  {r.get('url','')}\n  {c}")
-        except: pass
+        except Exception as e: 
+            print(f"[현재가 검색 실패] {e}")
+            
     if not snippets: return "[현재가 검색 실패]"
     return f"【현재 주가 ({datetime.now().strftime('%Y-%m-%d %H:%M')})】\n" + "\n\n".join(snippets)
 
 # ─── 어닝콜 수집 ─────────────────────────────────────────────────────────────
+# (어닝콜 관련 _fetch 함수들은 기존 코드 유지, API 에러가 나면 여기서도 에러를 뱉지만, 이 부분은 검색 엔진과는 별개입니다.)
 def fetch_earnings_transcript(ticker_raw, target_name="", market_id="sp500"):
     now = datetime.now()
     yr = now.year
@@ -437,6 +442,7 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
     sr = search_tavily_sns(qs["exa_sns"], market_id=market_id)
     et = fetch_earnings_transcript(ticker_raw, target_name=target, market_id=market_id) if ticker_raw else "[지수 — 어닝콜 해당 없음]"
 
+    # 90일 커트라인 유지 (파이썬 날짜 파싱 에러 완벽 차단)
     cutoff_str = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
 
     def fmt(items, label, show_p=False):
@@ -445,9 +451,9 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
         valid_count = 0
         
         for r in items:
-            date_str = r.get("date") or ""  # 🚨 수정 3: 빈 값일 때 문자열 길이를 재서 발생하는 에러 완벽 차단
+            date_str = r.get("date") or ""  
             
-            # 날짜가 있고 90일보다 오래된 데이터면 버립니다. (날짜가 없으면 일단 통과시킵니다)
+            # 90일 이전 데이터 깔끔하게 무시
             if date_str and len(date_str) >= 10 and date_str[:10] < cutoff_str:
                 continue 
 
