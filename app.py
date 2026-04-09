@@ -918,6 +918,31 @@ def display_leaderboard():
 
 # ─── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
+
+    # ======= 🚨 API 디버깅 블록 (여기서부터) =======
+    st.warning("🔍 API 단독 테스트 모드 작동 중...")
+    
+    # 1. Exa 테스트
+    try:
+        client_exa = get_exa()
+        # 가장 단순한 검색 요청
+        test_exa = client_exa.search_and_contents("Meta", num_results=1)
+        st.success("✅ Exa 정상 작동! (잔액 문제 아님)")
+    except Exception as e:
+        st.error(f"❌ Exa 에러 원인: {type(e).__name__} - {e}")
+
+    # 2. Tavily 테스트
+    try:
+        client_tav = get_tavily()
+        test_tav = client_tav.search("Meta", max_results=1)
+        st.success("✅ Tavily 정상 작동!")
+    except Exception as e:
+        st.error(f"❌ Tavily 에러 원인: {type(e).__name__} - {e}")
+        
+    st.stop() # 테스트 결과만 보고 앱을 멈춥니다.
+    # ======= 🚨 API 디버깅 블록 (여기까지) =======
+
+    
     col_title, col_info = st.columns([5,1])
     with col_title:
         qw = get_ollama_model('kospi200')
