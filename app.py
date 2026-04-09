@@ -161,16 +161,17 @@ def _get_sns_domains(market_id: str) -> list[str]:
     else:
         return ["reddit.com","stocktwits.com","x.com","twitter.com"]
 
-def _build_sns_queries(target: str, direction: str, market_id: str, year: int) -> list[str]:
-    # ✅ 수정 1: SNS 검색어를 대폭 간소화하여 검색 히트율을 극대화합니다.
+def _build_sns_queries(target: str, direction: str, market_id: str) -> list[str]:
+    # ✅ 수정 1: 불필요한 year 파라미터 삭제. SNS 검색어는 최대한 단순화하여 히트율 극대화
     dir_en = "bullish" if direction == "bull" else ("bearish" if direction == "bear" else "outlook")
+    
     if market_id == "kospi200":
         return [f"{target} 주식 종토방", f"{target} 매수 매도 여론"]
     elif market_id == "nikkei225":
         return [f"{target} 株 掲示板", f"{target} 個人投資家"]
     else:
         return [f"{target} stock {dir_en} reddit", f"{target} stock retail sentiment"]
-
+        
 def _detect_platform(url: str) -> str:
     if "reddit.com" in url: return "Reddit"
     if "stocktwits.com" in url: return "StockTwits"
@@ -194,32 +195,35 @@ FMP_TICKER_MAP = {
 
 # ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
 def build_queries(target, direction, market_index, sector="", market_id="sp500"):
-    now = datetime.now()
-    year = now.year
-    month = now.strftime("%B %Y")
+    # ✅ 수정 2: datetime, year, month 관련 변수 완전 삭제
     sn = f" {sector}" if sector else ""
+    
     if direction == "bull":
-        tq = [f"{target} stock buy rating target price upgrade analyst {month}",
-              f"{target}{sn} earnings beat revenue growth bullish {year}",
-              f"{market_index} bull market rally forecast {month}"]
+        tq = [f"{target} stock buy rating target price upgrade analyst",
+              f"{target}{sn} earnings beat revenue growth bullish",
+              f"{market_index} bull market rally forecast"]
         eq = [f"Investment research bullish case {target} price target upside",
-              f"Expert analysis {target} stock outperform {year}",
+              f"Expert analysis {target} stock outperform",
               f"{target}{sn} undervalued catalyst growth analyst recommendation"]
+              
     elif direction == "neutral":
-        tq = [f"{target} stock hold neutral rating mixed outlook {month}",
-              f"{target} sideways range-bound uncertainty {year}",
-              f"{market_index} flat market uncertainty {month}"]
+        tq = [f"{target} stock hold neutral rating mixed outlook",
+              f"{target} sideways range-bound uncertainty",
+              f"{market_index} flat market uncertainty"]
         eq = [f"Why {target} fairly valued neutral balanced risks",
-              f"{target}{sn} wait cautious analyst {year}",
+              f"{target}{sn} wait cautious analyst",
               f"{market_index} sideways market competing forces"]
+              
     else:
-        tq = [f"{target} stock sell downgrade target price cut analyst {month}",
-              f"{target}{sn} earnings miss decline bearish risk {year}",
-              f"{market_index} market correction crash risk {month}"]
+        tq = [f"{target} stock sell downgrade target price cut analyst",
+              f"{target}{sn} earnings miss decline bearish risk",
+              f"{market_index} market correction crash risk"]
         eq = [f"Investment research bearish short thesis {target} downside",
-              f"Expert column {target} overvalued headwinds {year}",
+              f"Expert column {target} overvalued headwinds",
               f"{target}{sn} structural decline disruption analysis"]
-    return {"tavily": tq, "exa_report": eq, "exa_sns": _build_sns_queries(target, direction, market_id, year)}
+              
+    # ✅ 수정 3: _build_sns_queries 호출 시 year 인자 제거
+    return {"tavily": tq, "exa_report": eq, "exa_sns": _build_sns_queries(target, direction, market_id)}
 
 # ─── SEARCH FUNCTIONS ──────────────────────────────────────────────────────────
 def search_tavily(queries):
