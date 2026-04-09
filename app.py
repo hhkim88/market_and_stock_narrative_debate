@@ -822,13 +822,14 @@ def display_leaderboard():
 def main():
     col_title, col_info = st.columns([5,1])
     with col_title:
+        qw = get_ollama_model('kospi200')
+        ll = get_ollama_model('sp500')
+        gm = get_ollama_model('nikkei225')
         st.markdown(f"""<h1 style='background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);
         -webkit-background-clip:text;-webkit-text-fill-color:transparent;font-size:26px;margin:0'>
         ⚡ 시장 방향 판정 엔진</h1>
         <p style='color:#4a5568;font-size:11px;letter-spacing:2px;margin:2px 0 0'>
-        7-AGENT AI · 향후 3개월 판정 · 🇰🇷{qw} / 🇺🇸{ll} / 🇯🇵{gm}</p>""".format(
-            qw=get_ollama_model('kospi200'),ll=get_ollama_model('sp500'),gm=get_ollama_model('nikkei225')
-        ), unsafe_allow_html=True)
+        7-AGENT AI · 향후 3개월 판정 · 🇰🇷{qw} / 🇺🇸{ll} / 🇯🇵{gm}</p>""", unsafe_allow_html=True)
     with col_info:
         ollama_url = get_ollama_url()
         st.markdown(f"<div style='color:#374151;font-size:10px;text-align:right;margin-top:8px'>🖥 {ollama_url[:30]}...</div>",unsafe_allow_html=True)
