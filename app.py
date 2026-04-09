@@ -387,61 +387,52 @@ def normalize_entity(target: str, ticker_raw: str = "", market_id: str = "sp500"
 def build_queries(target, direction, market_index, sector="", market_id="sp500", ticker_raw=""):
     entity = normalize_entity(target, ticker_raw, market_id)
     canonical = entity["canonical"]
-    aliases = entity["aliases"][:3]
+    aliases = entity["aliases"][:4]
     alias_main = canonical
     alias_or = " OR ".join([f'"{a}"' for a in aliases])
-
     sector_txt = f" {sector}" if sector else ""
-    terms = DIRECTIONAL_TERMS.get(direction, {}).get(market_id, [])
-
-    # 방향성 핵심 키워드 3개 정도만 압축 사용
-    k1 = terms[0] if len(terms) > 0 else ""
-    k2 = terms[1] if len(terms) > 1 else ""
-    k3 = terms[2] if len(terms) > 2 else ""
 
     if market_id == "kospi200":
         tavily_queries = [
-            f'{alias_or} {k1} 증권사 리포트',
-            f'{alias_or} {k2} 목표주가 투자의견',
-            f'{alias_or}{sector_txt} {k3} 실적 전망',
-            f'{market_index} {k1} 전망'
+            f'{alias_or} 최근 뉴스 사업 전략 경쟁 리스크',
+            f'{alias_or}{sector_txt} 실적 발표 수익성 수요 마진',
+            f'{alias_or} 투자 포인트 우려 요인',
+            f'{market_index} 최근 전망 거시 수급 금리 환율'
         ]
         exa_queries = [
-            f'{alias_main} {k1} long thesis',
-            f'{alias_main} {k2} analyst report',
-            f'{alias_main}{sector_txt} {k3} valuation',
-            f'{alias_main} bullish bearish investment thesis' if direction == "neutral" else f'{alias_main} {k1} investment thesis'
+            f'{alias_main} investment thesis strategy risk catalyst',
+            f'{alias_main} earnings release investor relations profitability',
+            f'{alias_main}{sector_txt} competition demand margin capex',
+            f'{alias_main} regulatory risk execution narrative'
         ]
     elif market_id == "nikkei225":
         tavily_queries = [
-            f'{alias_or} {k1} アナリスト レポート',
-            f'{alias_or} {k2} 目標株価 投資判断',
-            f'{alias_or}{sector_txt} {k3} 業績 見通し',
-            f'{market_index} {k1} 見通し'
+            f'{alias_or} 最新ニュース 事業戦略 競争 リスク',
+            f'{alias_or}{sector_txt} 決算 収益性 需要 マージン',
+            f'{alias_or} 投資ポイント 懸念材料',
+            f'{market_index} 見通し 金利 為替 マクロ'
         ]
         exa_queries = [
-            f'{alias_main} {k1} long thesis',
-            f'{alias_main} {k2} analyst report',
-            f'{alias_main}{sector_txt} {k3} profitability',
-            f'{alias_main} investment thesis {direction}'
+            f'{alias_main} investment thesis strategy risk catalyst',
+            f'{alias_main} earnings release investor relations profitability',
+            f'{alias_main}{sector_txt} competition demand margin capex',
+            f'{alias_main} regulatory risk execution narrative'
         ]
     else:
         tavily_queries = [
-            f'{alias_or} {k1} analyst note',
-            f'{alias_or} {k2} price target',
-            f'{alias_or}{sector_txt} {k3} earnings outlook',
-            f'{market_index} {k1} outlook'
+            f'{alias_or} latest news strategy competition risk',
+            f'{alias_or}{sector_txt} earnings profitability demand margins',
+            f'{alias_or} key debate catalysts concerns',
+            f'{market_index} latest outlook macro rates positioning'
         ]
         exa_queries = [
-            f'{alias_main} {k1} investment thesis',
-            f'{alias_main} {k2} analyst report',
-            f'{alias_main}{sector_txt} {k3} profitability outlook',
-            f'{alias_main} bull case' if direction == "bull" else
-            f'{alias_main} bear case' if direction == "bear" else
-            f'{alias_main} balanced outlook'
+            f'{alias_main} investment thesis strategy risk catalyst',
+            f'{alias_main} earnings release investor relations profitability',
+            f'{alias_main}{sector_txt} competition demand margin capex',
+            f'{alias_main} regulatory risk execution narrative'
         ]
 
-    sns_queries = _build_sns_queries(alias_main, direction, market_id)
+    sns_queries = _build_sns_queries(alias_main, "neutral", market_id)
 
     return {
         "entity": entity,
@@ -713,8 +704,14 @@ def _fetch_fmp(ticker, fmp_key, yr, yr_p):
 
 def combined_search(target, direction, market_index, sector="", ticker_raw="", market_id="sp500"):
     qs = build_queries(target, direction, market_index, sector, market_id, ticker_raw=ticker_raw)
+
     tr = search_tavily(qs["tavily"])
-    er = search_exa_reports(qs["exa_report"], entity_info=qs.get("entity"), recent_days=120, market_id=market_id)
+    er = search_exa_reports(
+        qs["exa_report"],
+        entity_info=qs.get("entity"),
+        recent_days=120,
+        market_id=market_id
+    )
     sr = search_tavily_sns(qs["exa_sns"], market_id=market_id)
     et = fetch_earnings_transcript(ticker_raw, target_name=target, market_id=market_id) if ticker_raw else "[지수 — 어닝콜 해당 없음]"
 
@@ -743,18 +740,22 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
 
         if valid_count == 0:
             return f"【{label}】\n최근 3개월 내 유의미한 결과 없음\n"
-
         return "\n".join(lines)
 
-    dir_ko = "강세" if direction == "bull" else "중립" if direction == "neutral" else "약세"
-    hdr = f"=== {target}[{dir_ko}] ({datetime.now().strftime('%Y-%m-%d')}) ===\n소스: Tavily+Exa+SNS+어닝콜\n"
-    return hdr + "\n\n".join([
-        fmt(tr, "① 최신 뉴스·애널리스트"),
-        fmt(er, "② 금융 리포트·칼럼"),
-        fmt(sr, "③ SNS·커뮤니티 여론", show_p=True),
-        f"④ 어닝콜·실적발표\n{et}",
-    ])
+    hdr = (
+        f"=== {target} [중립 수집] ({datetime.now().strftime('%Y-%m-%d')}) ===\n"
+        f"소스: Tavily + Exa + SNS + 어닝콜\n"
+        f"주의: 아래 자료는 방향성 유도 없이 수집된 원자료이며, "
+        f"강세/중립/약세 해석은 이후 에이전트가 수행한다.\n"
+    )
 
+    return hdr + "\n\n".join([
+        fmt(tr, "① 최근 뉴스·핵심 논점"),
+        fmt(er, "② IR·리포트·공시·장문 자료"),
+        fmt(sr, "③ SNS·커뮤니티 반응", show_p=True),
+        f"【④ 어닝콜·실적발표】\n{et}",
+    ])
+    
 # ─── LLM 호출 (로컬 Ollama 우선, 없으면 Anthropic API fallback) ──────────────
 def call_llm(system: str, user_content: str, max_tokens: int = 4000, market_id: str = "sp500") -> str:
     """
@@ -931,50 +932,60 @@ def build_system_prompts(market, stock=None):
     base_warn = f"\n⚠️ 절대 금지: 검색 결과에 없는 수치 조작 금지. {cutoff_str_ko} 이전 데이터(오래된 목표가)는 철저히 배제할 것."
 
     return {
-        "bull": f"""{lang_instruction}
+"bull": f"""{lang_instruction}
 ## 📈 {target} 강세 내러티브 수집 (향후 3개월)
-### 주요 강세론자 및 기관 [실명·기관명·최신 목표가 포함]
-### 지배적인 강세 스토리라인 [누가, 왜, 어떤 근거로]
-### 핵심 데이터 및 근거 [수치·지표 직접 인용]
-### SNS·커뮤니티 강세 여론 [실제 분위기 Raw 요약]
-### 어닝콜 핵심 포인트 [경영진 발언 중 강세 근거]
-### 강세 전제 조건
+### 강세 내러티브의 핵심 주장
+### 그 주장을 떠받치는 인과 구조 [왜 이 기업/지수가 좋아질 것인가]
+### 핵심 근거 [수치보다 논리와 메커니즘 중심]
+### 반대 증거에 대한 강세 측의 반론
+### SNS·커뮤니티에서 확인되는 정서
+### 어닝콜 핵심 포인트 [강세 해석 가능 구절]
+### 강세 내러티브의 전제 조건
+### 강세 내러티브 강도 평가 [1-10점]
 ### 강세 내러티브 3줄 요약
+중요: 목표가·투자의견 자체를 평가의 중심에 두지 말고, 내러티브의 설득력과 구조적 완결성을 중심으로 평가하시오.
 출처(기관명, 날짜, URL)를 반드시 명시하시오.{base_warn}""",
 
-        "neutral": f"""{lang_instruction}
+"neutral": f"""{lang_instruction}
 ## ➡️ {target} 중립 내러티브 수집 (향후 3개월)
-### 주요 중립론자 및 기관
-### 지배적인 중립 스토리라인
-### 핵심 데이터 및 근거
-### SNS·커뮤니티 중립 여론
-### 어닝콜 핵심 포인트 [불확실성·중립 신호]
-### 중립 전제 조건
+### 중립 내러티브의 핵심 주장
+### 그 주장을 떠받치는 인과 구조
+### 핵심 근거 [수치보다 논리와 메커니즘 중심]
+### 강세·약세 양측이 모두 놓치고 있는 점
+### SNS·커뮤니티에서 확인되는 정서
+### 어닝콜 핵심 포인트 [불확실성·균형 신호]
+### 중립 내러티브의 전제 조건
+### 중립 내러티브 강도 평가 [1-10점]
 ### 중립 내러티브 3줄 요약
+중요: 목표가·투자의견 자체를 평가의 중심에 두지 말고, 내러티브의 설득력과 구조적 완결성을 중심으로 평가하시오.
 출처를 반드시 명시하시오.{base_warn}""",
 
-        "bear": f"""{lang_instruction}
+"bear": f"""{lang_instruction}
 ## 📉 {target} 약세 내러티브 수집 (향후 3개월)
-### 주요 약세론자 및 기관
-### 지배적인 약세 스토리라인
-### 핵심 데이터 및 근거
-### SNS·커뮤니티 약세 여론 [우려·공포 분위기]
-### 어닝콜 핵심 포인트 [리스크·약세 시그널]
-### 약세 전제 조건
+### 약세 내러티브의 핵심 주장
+### 그 주장을 떠받치는 인과 구조 [왜 악화될 것인가]
+### 핵심 근거 [수치보다 논리와 메커니즘 중심]
+### 반대 증거에 대한 약세 측의 반론
+### SNS·커뮤니티에서 확인되는 정서
+### 어닝콜 핵심 포인트 [리스크·악화 시그널]
+### 약세 내러티브의 전제 조건
+### 약세 내러티브 강도 평가 [1-10점]
 ### 약세 내러티브 3줄 요약
+중요: 목표가·투자의견 자체를 평가의 중심에 두지 말고, 내러티브의 설득력과 구조적 완결성을 중심으로 평가하시오.
 출처를 반드시 명시하시오.{base_warn}""",
 
-        "bull_critic": f"""{lang_instruction}
+"bull_critic": f"""{lang_instruction}
 You are an adversarial analyst stress-testing bullish narratives.
 Output only one final Korean version.
 Do not include English source text.
 Do not add '번역' or 'Translation' sections.
 ## 🔥 강세 내러티브 비판
-### 근거의 취약점 [데이터 오독, 과거 데이터 사용 여부]
-### 강세가 외면한 반대 증거
-### 논리적 허점
-### 향후 3개월 강세 붕괴 리스크
-### 강세 신뢰도 [1-10점 및 2줄 평가]""",
+### 서사의 약한 고리 [인과 연결의 약함]
+### 강세가 무시한 반대 증거
+### 강세 논리의 비약 또는 과장
+### 향후 3개월 내 강세 서사가 무너질 조건
+### 강세 내러티브 신뢰도 [1-10점 및 2줄 평가]
+중요: 목표가나 투자의견 수준이 아니라 내러티브의 설득력 자체를 비판하시오.""",
 
         "neutral_critic": f"""{lang_instruction}
 You are an adversarial analyst stress-testing neutral narratives.
@@ -982,11 +993,12 @@ Output only one final Korean version.
 Do not include English source text.
 Do not add '번역' or 'Translation' sections.
 ## 🔥 중립 내러티브 비판
-### 거짓 균형의 함정
-### 중립이 외면한 방향성 신호
-### 역사적 실패 사례
-### 방향성 강제 촉매
-### 중립 신뢰도 [1-10점 및 2줄 평가]""",
+### 서사의 약한 고리 [인과 연결의 약함]
+### 중립이 무시한 반대 증거
+### 중립 논리의 비약 또는 과장
+### 향후 3개월 내 중립 서사가 무너질 조건
+### 중립 내러티브 신뢰도 [1-10점 및 2줄 평가]
+중요: 목표가나 투자의견 수준이 아니라 내러티브의 설득력 자체를 비판하시오.""",
 
         "bear_critic": f"""{lang_instruction}
 You are an adversarial analyst stress-testing bearish narratives.
@@ -994,32 +1006,41 @@ Output only one final Korean version.
 Do not include English source text.
 Do not add '번역' or 'Translation' sections.
 ## 🔥 약세 내러티브 비판
-### 과거 패턴 오남용
-### 약세가 외면한 회복력 근거
-### 같은 약세 논리의 실패 전례
-### 과소평가한 정책 대응 [{cb}]
-### 약세 신뢰도 [1-10점 및 2줄 평가]""",
+### 서사의 약한 고리 [인과 연결의 약함]
+### 약세가 무시한 반대 증거
+### 약세 논리의 비약 또는 과장
+### 향후 3개월 내 약세 서사가 무너질 조건
+### 약세 내러티브 신뢰도 [1-10점 및 2줄 평가]
+중요: 목표가나 투자의견 수준이 아니라 내러티브의 설득력 자체를 비판하시오.""",
 
-        "judge": f"""{lang_instruction}
+"judge": f"""{lang_instruction}
 You are the Chief Investment Strategist reviewing a 6-agent debate.
 Output only one final Korean version.
 Do not include English source text.
 Do not add '번역' or 'Translation' sections.
 
 ⚠️ 절대 금지:
-- 【실시간 현재가】에 없는 주가 수치 조작 금지
-- {cutoff_str_ko} 이전의 과거 목표가 및 분석 내용 채택 엄격히 금지
+- 목표가 자체를 근거의 중심으로 삼지 말 것
+- 【실시간 현재가】를 참고 정보 이상으로 과대평가하지 말 것
+- {cutoff_str_ko} 이전의 과거 자료 채택 금지
 
 ## 핵심 요약
-[정확히 4문장. 1:가장 그럴듯한 최신 내러티브. 2:강력한 지지 근거. 3:경쟁 내러티브의 약점. 4:판단을 뒤집을 핵심 변수.]
+[정확히 4문장. 1:가장 강한 내러티브. 2:그 서사의 인과 구조. 3:가장 취약한 경쟁 내러티브. 4:판단을 뒤집을 변수.]
 
 ## ⚡ 최종 판정
 
 ### 가장 그럴듯한 내러티브: [강세 / 중립 / 약세]
-[설득력 있는 스토리. 현재가 기준. 검색 결과 사실만.]
+
+### 내러티브 강도 평가
+- 강세 내러티브 강도: [1-10]
+- 중립 내러티브 강도: [1-10]
+- 약세 내러티브 강도: [1-10]
+
+### 선택 이유
+[왜 가장 설득력 있는지. 목표가가 아니라 서사의 구조적 완결성, 인과 논리, 반증 대응력을 중심으로 서술]
 
 ### 현재 가격 기준 상황
-[실시간 현재가 정보 요약]
+[보조 정보로 짧게 요약]
 
 ### 최신 핵심 근거
 **근거 1:** [출처 + 사실]
@@ -1029,6 +1050,10 @@ Do not add '번역' or 'Translation' sections.
 **근거 5:** [출처 + 사실]
 
 ### 경쟁 내러티브 탈락 이유
+[왜 다른 내러티브들이 덜 설득력 있었는지 간결하게 서술]
+
+### 최근 TP 및 투자의견 변화 (참고용)
+[있을 경우에만 2~4줄 이내로 요약. 목표가 수준 자체보다, 상향/하향의 방향성과 그 근거가 내러티브와 일치하는지 여부만 간략히 언급]
 
 ### 확률 분포
 **강세장 (유의미한 상승): XX%**
@@ -1036,7 +1061,7 @@ Do not add '번역' or 'Translation' sections.
 **약세장 (유의미한 하락): XX%**
 
 ### 핵심 변수 (상위 3개)
-결단하라.""",
+[향후 3개월 내 판정을 바꿀 수 있는 변수만 간결히 제시]""",
     }
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
@@ -1072,68 +1097,86 @@ def age_label(hours):
 def _run_analysis_core(target_id, target_label, market, stock, prompts):
     results = {}
     target_short = stock[1] if stock else market["index"]
-    sector     = stock[2] if stock else ""
+    sector = stock[2] if stock else ""
     ticker_raw = stock[0] if stock else ""
 
-    # ── Phase 1: 내러티브 수집 ─────────────────────────────────────────────────
-    agents_p1 = [("bull","bull"),("neutral","neutral"),("bear","bear")]
-    for i,(agent,direction) in enumerate(agents_p1):
-        dir_label = {"bull":"강세","neutral":"중립","bear":"약세"}[direction]
-        pct = 0.05 + i*0.13
-        update_progress(target_id, pct, f"🔍 {AGENT_LABELS[agent]} — 검색 중...")
+    # ── Phase 0: 공통 증거 수집 ───────────────────────────────────────────────
+    update_progress(target_id, 0.05, "🔍 공통 증거 수집 중...")
+    try:
+        shared_search_results = combined_search(
+            target_short,
+            "neutral",
+            market["index"],
+            sector=sector,
+            ticker_raw=ticker_raw,
+            market_id=market["id"],
+        )
+    except Exception as e:
+        shared_search_results = f"⚠️ 공통 검색 오류: {e}"
+
+    # ── Phase 1: 동일 증거 기반 내러티브 수집 ────────────────────────────────
+    agents_p1 = [("bull", "강세"), ("neutral", "중립"), ("bear", "약세")]
+    for i, (agent, dir_label) in enumerate(agents_p1):
+        pct = 0.12 + i * 0.11
+        update_progress(target_id, pct, f"🤖 {AGENT_LABELS[agent]} — 내러티브 구성 중...")
         try:
-            search_results = combined_search(
-                target_short, direction, market["index"],
-                sector=sector, ticker_raw=ticker_raw, market_id=market["id"],
-            )
-            update_progress(target_id, pct+0.06, f"🤖 {AGENT_LABELS[agent]} — LLM 분석 중...")
             user_content = (
                 f"다음은 오늘({datetime.now().strftime('%Y년 %m월 %d일')}) 기준 "
-                f"{target_label} 검색 결과입니다:\n\n{search_results}\n\n"
-                f"위 결과를 바탕으로 {dir_label} 내러티브를 수집·정리하십시오."
+                f"{target_label}에 관한 공통 원자료입니다.\n\n"
+                f"{shared_search_results}\n\n"
+                f"이 자료만 바탕으로 {dir_label} 내러티브를 가장 설득력 있게 구성하십시오.\n"
+                f"중요: 목표가나 투자의견 자체보다, 왜 그런 해석이 가능한지의 서사적 구조와 인과 논리에 집중하십시오."
             )
-            # results[agent] = call_llm(prompts[agent], user_content, market_id=market["id"])
             raw = call_llm(prompts[agent], user_content, market_id=market["id"])
             results[agent] = strip_duplicate_translation(raw)
         except Exception as e:
             results[agent] = f"⚠️ 오류: {e}"
 
-    # ── Phase 2: 비판 ──────────────────────────────────────────────────────────
-    update_progress(target_id, 0.45, "Phase 2 · 비판 검증 시작...")
+    # ── Phase 2: 비판 ────────────────────────────────────────────────────────
+    update_progress(target_id, 0.45, "Phase 2 · 비판 검증 시작.")
     critic_map = {"bull_critic":("bull","강세"),"neutral_critic":("neutral","중립"),"bear_critic":("bear","약세")}
     for i,agent in enumerate(["bull_critic","neutral_critic","bear_critic"]):
         src, label = critic_map[agent]
         pct = 0.45 + i*0.12
-        update_progress(target_id, pct, f"🔥 {AGENT_LABELS[agent]} — 비판 중...")
+        update_progress(target_id, pct, f"🔥 {AGENT_LABELS[agent]} — 비판 중.")
         try:
-            user_content = f"[{label} 내러티브]:\n{results.get(src,'')}\n\n위 내러티브를 냉정하게 비판하시오."
-            # results[agent] = call_llm(prompts[agent], user_content, market_id=market["id"])
+            user_content = (
+                f"[{label} 내러티브]:\n{results.get(src,'')}\n\n"
+                f"위 내러티브를 냉정하게 비판하시오.\n"
+                f"중요: 목표가 수준이 아니라 서사의 빈약함, 인과 연결의 약함, 누락된 반대 증거를 중심으로 비판하시오."
+            )
             raw = call_llm(prompts[agent], user_content, market_id=market["id"])
             results[agent] = strip_duplicate_translation(raw)
         except Exception as e:
             results[agent] = f"⚠️ 오류: {e}"
 
-    # ── Phase 3: 최종 판정 ─────────────────────────────────────────────────────
-    update_progress(target_id, 0.82, "📡 현재 주가 조회 + 최종 판정 중...")
+    # ── Phase 3: 최종 판정 ───────────────────────────────────────────────────
+    update_progress(target_id, 0.82, "📡 현재 주가 조회 + 최종 판정 중.")
     try:
         price_ctx = fetch_current_price(target_short, ticker_raw, market["id"])
         judge_input = (
-            f"【실시간 현재가 — 반드시 이 가격 기준으로 판단하시오】\n{price_ctx}\n\n{'='*50}\n\n"
-            + "\n\n".join(f"[{AGENT_LABELS[a]}]:\n{results.get(a,'')}"
-                         for a in ["bull","neutral","bear","bull_critic","neutral_critic","bear_critic"])
-            + "\n\n위 토론과 현재가를 종합하여 최종 판정을 내리시오."
+            f"【실시간 현재가 — 참고 정보】\n{price_ctx}\n\n"
+            f"{'='*50}\n\n"
+            + "\n\n".join(
+                f"[{AGENT_LABELS[a]}]:\n{results.get(a,'')}"
+                for a in ["bull","neutral","bear","bull_critic","neutral_critic","bear_critic"]
+            )
+            + "\n\n최종 판정을 내리시오. 단, 현재가는 보조 정보일 뿐이며, 판단의 중심은 내러티브의 설득력·인과 구조·반증 대응력이어야 한다."
         )
-        results["judge"] = call_llm(prompts["judge"], judge_input, max_tokens=8000, market_id=market["id"])
+        raw = call_llm(prompts["judge"], judge_input, max_tokens=8000, market_id=market["id"])
+        results["judge"] = strip_duplicate_translation(raw)
     except Exception as e:
         results["judge"] = f"⚠️ 오류: {e}"
 
-    # ── 저장 ───────────────────────────────────────────────────────────────────
     update_progress(target_id, 0.98, "✅ 저장 중...")
     bp, np_, rp = extract_probs(results.get("judge",""))
-    bp = bp or 50; np_ = np_ or 30; rp = rp or 20
+    bp = bp or 50
+    np_ = np_ or 30
+    rp = rp or 20
     winner = winner_from_probs(bp, np_, rp)
-    if bp==50 and np_==30 and rp==20:
+    if bp == 50 and np_ == 30 and rp == 20:
         winner = extract_winner(results.get("judge","")) or "neutral"
+
     cache_set(target_id, market["id"], target_label, results, winner,
               bull_prob=bp, neutral_prob=np_, bear_prob=rp, status="done")
     update_progress(target_id, 1.0, "✅ 분석 완료!")
