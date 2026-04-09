@@ -395,16 +395,31 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
     sr = search_tavily_sns(qs["exa_sns"], market_id=market_id)
     et = fetch_earnings_transcript(ticker_raw, target_name=target, market_id=market_id) if ticker_raw else "[지수 — 어닝콜 해당 없음]"
 
+    # ✅ 90일(3개월) 커트라인 문자열 생성 (예: "2026-01-09")
+    cutoff_str = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+
     def fmt(items, label, show_p=False):
         if not items: return f"【{label}】\n결과 없음\n"
         lines=[f"【{label}】"]
+        valid_count = 0
+        
         for r in items:
-            ds=f" ({r['date'][:10]})" if r.get("date") else ""
+            date_str = r.get("date", "")
+            # 🚨 핵심: 날짜가 존재하고, 그 날짜가 커트라인(90일 전)보다 과거라면 아예 LLM에게 주지 않습니다.
+            if date_str and len(date_str) >= 10 and date_str[:10] < cutoff_str:
+                continue 
+
+            valid_count += 1
+            ds=f" ({date_str[:10]})" if date_str else ""
             pl=f"[{r.get('platform','')}] " if show_p and r.get("platform") else ""
             lines.append(f"■ {pl}{r['title']}{ds}")
             if r.get("url"): lines.append(f"  {r['url']}")
             if r.get("content"): lines.append(f"  {r['content']}")
             lines.append("")
+            
+        if valid_count == 0:
+            return f"【{label}】\n최근 3개월 내 유의미한 결과 없음\n"
+            
         return "\n".join(lines)
 
     dir_ko="강세" if direction=="bull" else "중립" if direction=="neutral" else "약세"
@@ -549,33 +564,40 @@ def build_system_prompts(market, stock=None):
     target = f"{stock[1]} ({stock[0]})" if stock else idx
     sn = f" (섹터: {stock[2]}, {idx} 상장)" if stock else ""
 
-    # ✅ 핵심: 시장별 현지 언어로 페르소나를 부여하여 해당 언어의 뉴런(추론 능력)을 극대화합니다.
-    # 단, UI 출력을 위해 최종 아웃풋은 반드시 한국어(Korean)로 고정합니다.
+    # ✅ 3개월(90일) 커트라인 날짜 계산
+    cutoff_date = (datetime.now() - timedelta(days=90))
+    cutoff_str_ko = cutoff_date.strftime("%Y년 %m월 %d일")
+    cutoff_str_en = cutoff_date.strftime("%B %d, %Y")
+    cutoff_str_jp = cutoff_date.strftime("%Y年%m月%d日")
+
     if market["id"] == "sp500":
         lang_instruction = (
             f"You are a top-tier Wall Street investment analyst. "
             f"You must deeply analyze the provided English financial reports, Reddit/StockTwits sentiment, and earnings calls in English to capture the exact market nuances. "
+            f"🚨 CRITICAL RULE: Strictly ignore any data, target prices, ratings, or news older than 3 months (before {cutoff_str_en}). Only use the most recent information. "
             f"However, **YOUR ENTIRE FINAL OUTPUT MUST BE TRANSLATED TO AND WRITTEN IN KOREAN (한국어)** following the exact Korean headers provided below."
         )
     elif market["id"] == "nikkei225":
         lang_instruction = (
             f"あなたは日本市場の専門アナリストです。"
             f"提供された日本語のニュース、みんかぶや株探の掲示板の意見、決算情報を日本語のまま深く分析し、日本市場特有の細かいニュアンスを正確に把握してください。"
+            f"🚨 重要ルール: 3ヶ月前（{cutoff_str_jp}以前）の古いデータ、目標株価、ニュースは絶対に無視し、直近の情報のみを使用してください。"
             f"ただし、**最終的な出力はすべて韓国語（한국어）で翻訳して作成**し、以下の韓国語の見出しに必ず従ってください。"
         )
     else:  # kospi200
         lang_instruction = (
             f"당신은 여의도 최고의 한국 시장 전문 애널리스트입니다. "
             f"주어진 한국어 뉴스, 네이버 종토방 여론, 실적발표 자료를 바탕으로 시장의 숨겨진 의도와 방향성을 깊이 있게 분석하십시오. "
+            f"🚨 절대 규칙: 3개월 전({cutoff_str_ko}) 기준 과거의 낡은 데이터, 목표가, 투자의견은 절대 무시하고 오직 최신 정보만 인용하십시오. "
             f"**모든 출력은 한국어**로 작성하십시오."
         )
 
-    base_warn = "\n⚠️ 검색 결과에 없는 주가·목표가·손절가를 절대 만들어내지 말 것. 수치는 출처가 있는 것만 인용."
+    base_warn = f"\n⚠️ 절대 금지: 검색 결과에 없는 수치 조작 금지. {cutoff_str_ko} 이전 데이터(오래된 목표가)는 철저히 배제할 것."
 
     return {
         "bull": f"""{lang_instruction}
 ## 📈 {target} 강세 내러티브 수집 (향후 3개월)
-### 주요 강세론자 및 기관 [실명·기관명·목표가 포함]
+### 주요 강세론자 및 기관 [실명·기관명·최신 목표가 포함]
 ### 지배적인 강세 스토리라인 [누가, 왜, 어떤 근거로]
 ### 핵심 데이터 및 근거 [수치·지표 직접 인용]
 ### SNS·커뮤니티 강세 여론 [실제 분위기 Raw 요약]
@@ -609,7 +631,7 @@ def build_system_prompts(market, stock=None):
         "bull_critic": f"""{lang_instruction}
 You are an adversarial analyst stress-testing bullish narratives.
 ## 🔥 강세 내러티브 비판
-### 근거의 취약점 [데이터 오독, 체리피킹]
+### 근거의 취약점 [데이터 오독, 과거 데이터 사용 여부]
 ### 강세가 외면한 반대 증거
 ### 논리적 허점
 ### 향후 3개월 강세 붕괴 리스크
@@ -637,12 +659,11 @@ You are an adversarial analyst stress-testing bearish narratives.
 You are the Chief Investment Strategist reviewing a 6-agent debate.
 
 ⚠️ 절대 금지:
-- 【실시간 현재가】에 없는 주가 수치를 만들어내지 말 것
-- 출처 없는 손절가·익절가·목표가 생성 금지
-- 수치 인용 시 반드시 "○○기관에 따르면" 출처 명시
+- 【실시간 현재가】에 없는 주가 수치 조작 금지
+- {cutoff_str_ko} 이전의 과거 목표가 및 분석 내용 채택 엄격히 금지
 
 ## 핵심 요약
-[정확히 4문장. 1:가장 그럴듯한 내러티브와 핵심 이유. 2:가장 강력한 지지 근거. 3:경쟁 내러티브의 치명적 약점. 4:판단을 뒤집을 핵심 변수.]
+[정확히 4문장. 1:가장 그럴듯한 최신 내러티브. 2:강력한 지지 근거. 3:경쟁 내러티브의 약점. 4:판단을 뒤집을 핵심 변수.]
 
 ## ⚡ 최종 판정
 
@@ -652,7 +673,7 @@ You are the Chief Investment Strategist reviewing a 6-agent debate.
 ### 현재 가격 기준 상황
 [실시간 현재가 정보 요약]
 
-### 핵심 근거
+### 최신 핵심 근거
 **근거 1:** [출처 + 사실]
 **근거 2:** [출처 + 사실]
 **근거 3:** [출처 + 사실]
