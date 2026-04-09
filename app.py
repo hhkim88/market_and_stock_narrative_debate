@@ -420,9 +420,9 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
 def call_llm(system: str, user_content: str, max_tokens: int = 4000, market_id: str = "sp500") -> str:
     """
     시장별 최적 LLM 자동 선택:
-      🇰🇷 KOSPI  → qwen2.5:72b   (한국어 최강)
-      🇺🇸 S&P500 → llama3.3:70b  (영어 강점)
-      🇯🇵 Nikkei → gemma3:27b    (기본값)
+      🇰🇷 KOSPI  → qwen2.5:32b  
+      🇺🇸 S&P500 → gemma3:27b  
+      🇯🇵 Nikkei → gemma3:27b    
     1순위: 로컬 Ollama / 2순위: Anthropic API fallback
     """
     ollama_url = get_ollama_url()
