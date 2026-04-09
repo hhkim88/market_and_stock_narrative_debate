@@ -134,6 +134,60 @@ AGENT_LABELS = {
     "judge":"⚡ 최종 판정자",
 }
 
+DIRECTIONAL_TERMS = {
+    "bull": {
+        "sp500": [
+            "upside", "outperform", "overweight", "price target raise",
+            "earnings upside", "margin expansion", "multiple rerating",
+            "AI monetization", "market share gains", "cycle recovery",
+            "pricing power", "strong guidance", "demand resilience"
+        ],
+        "kospi200": [
+            "상승 여력", "매수", "목표주가 상향", "실적 개선",
+            "이익 성장", "마진 개선", "밸류에이션 재평가",
+            "업황 회복", "점유율 확대", "수요 견조", "가이던스 상향"
+        ],
+        "nikkei225": [
+            "上値余地", "買い", "目標株価引き上げ", "業績上振れ",
+            "利益率改善", "リレーティング", "需要堅調",
+            "シェア拡大", "構造的成長", "ガイダンス上方修正"
+        ]
+    },
+    "neutral": {
+        "sp500": [
+            "mixed outlook", "fairly valued", "balanced risk reward",
+            "range-bound", "uncertainty", "wait and see",
+            "limited upside", "macro dependent", "sideways"
+        ],
+        "kospi200": [
+            "중립", "보합", "관망", "불확실성", "박스권",
+            "제한적 상승", "밸류 적정", "혼조", "방향성 부재"
+        ],
+        "nikkei225": [
+            "中立", "様子見", "ボックス圏", "不透明感",
+            "方向感乏しい", "割安でも割高でもない", "均衡"
+        ]
+    },
+    "bear": {
+        "sp500": [
+            "downside", "underperform", "sell rating", "price target cut",
+            "earnings risk", "margin pressure", "valuation compression",
+            "demand slowdown", "inventory correction", "regulatory risk",
+            "execution risk", "macro headwinds", "overvalued"
+        ],
+        "kospi200": [
+            "하락 여력", "매도", "목표주가 하향", "실적 부진",
+            "마진 압박", "수요 둔화", "밸류 부담", "재고 조정",
+            "규제 리스크", "거시 역풍", "과대평가"
+        ],
+        "nikkei225": [
+            "下値余地", "売り", "目標株価引き下げ", "業績下振れ",
+            "利益率悪化", "需要減速", "在庫調整", "規制リスク",
+            "マクロ逆風", "割高"
+        ]
+    }
+}
+
 # ─── SEARCH CLIENTS ────────────────────────────────────────────────────────────
 @st.cache_resource
 def get_tavily():
@@ -151,6 +205,8 @@ EXA_FINANCIAL_DOMAINS = [
     "hankyung.com", "mk.co.kr", "edaily.co.kr", "thebell.co.kr",
     "fnguide.com", "investing.com", "nikkei.com", "toyokeizai.net",
 ]
+
+
 
 # ─── SNS 도메인·쿼리 (시장별) ────────────────────────────────────────────────
 def _get_sns_domains(market_id: str) -> list[str]:
@@ -181,6 +237,46 @@ def _detect_platform(url: str) -> str:
     if "kabutan" in url: return "株探"
     return "커뮤니티"
 
+def build_stock_lookup():
+    """
+    STOCKS 딕셔너리를 기반으로
+    ticker / name / market_id 정보를 빠르게 찾을 수 있는 lookup 생성
+    """
+    lookup = {}
+
+    for market_id, items in STOCKS.items():
+        for ticker, name, sector in items:
+            lookup[ticker.upper()] = {
+                "ticker": ticker,
+                "name": name,
+                "sector": sector,
+                "market_id": market_id,
+            }
+            lookup[name.strip().lower()] = {
+                "ticker": ticker,
+                "name": name,
+                "sector": sector,
+                "market_id": market_id,
+            }
+
+    return lookup
+
+ENTITY_OVERRIDE = {
+    # 정말 필요한 예외만
+    "META": {
+        "canonical": "Meta Platforms",
+        "aliases": ["Meta Platforms", "Meta", "NASDAQ:META", "META"]
+    },
+    "GOOGL": {
+        "canonical": "Alphabet",
+        "aliases": ["Alphabet", "Google", "NASDAQ:GOOGL", "GOOGL"]
+    },
+    "BRK.B": {
+        "canonical": "Berkshire Hathaway",
+        "aliases": ["Berkshire Hathaway", "NYSE:BRK.B", "BRK.B"]
+    },
+}
+
 FMP_TICKER_MAP = {
     "005930":"005930.KS","000660":"000660.KS","207940":"207940.KS","005380":"005380.KS",
     "000270":"000270.KS","051910":"051910.KS","035420":"035420.KS","035720":"035720.KS",
@@ -193,37 +289,166 @@ FMP_TICKER_MAP = {
     "4502":"4502.T","6971":"6971.T","7751":"7751.T","6954":"6954.T","3382":"3382.T",
 }
 
-# ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
-# ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
-def build_queries(target, direction, market_index, sector="", market_id="sp500"):
-    # ✅ 수정 1: 검색어에서 year, month를 제거하여 검색 엔진의 자유도를 높임
-    sn = f" {sector}" if sector else ""
+def normalize_entity(target: str, ticker_raw: str = "", market_id: str = "sp500") -> dict:
+    """
+    전체 시장 종목에 대해 동적으로 alias 생성.
+    일부 특수 기업만 ENTITY_OVERRIDE로 보정.
+    """
+    target = (target or "").strip()
+    ticker_raw = (ticker_raw or "").strip()
+
+    lookup = build_stock_lookup()
+
+    # 1) 우선 ticker_raw 기준 탐색
+    stock_info = None
+    key_candidates = []
+
+    if ticker_raw:
+        key_candidates.append(ticker_raw.upper())
+    if target:
+        key_candidates.append(target.upper())
+        key_candidates.append(target.lower())
+
+    for key in key_candidates:
+        if key in lookup:
+            stock_info = lookup[key]
+            break
+
+    # 2) 지수 처리
+    target_l = target.lower()
+    if market_id == "sp500" and target_l in ["s&p 500", "sp500", "s&p500"]:
+        return {
+            "canonical": "S&P 500",
+            "aliases": ["S&P 500", "SP500", "SPX", "US large cap equities"]
+        }
+    if market_id == "kospi200" and target_l in ["kospi 200", "kospi200", "코스피200"]:
+        return {
+            "canonical": "KOSPI 200",
+            "aliases": ["KOSPI 200", "코스피200", "Korean large cap equities"]
+        }
+    if market_id == "nikkei225" and target_l in ["nikkei 225", "nikkei225", "닛케이225", "日経225"]:
+        return {
+            "canonical": "Nikkei 225",
+            "aliases": ["Nikkei 225", "日経225", "Japanese large cap equities"]
+        }
+
+    # 3) 종목 처리
+    if stock_info:
+        ticker = stock_info["ticker"]
+        name = stock_info["name"]
+        resolved_market = stock_info["market_id"]
+
+        # 특수 예외 우선
+        if ticker.upper() in ENTITY_OVERRIDE:
+            base = ENTITY_OVERRIDE[ticker.upper()].copy()
+            aliases = list(dict.fromkeys(base["aliases"] + [name, ticker]))
+            return {
+                "canonical": base["canonical"],
+                "aliases": aliases,
+                "ticker": ticker,
+                "name": name,
+                "market_id": resolved_market,
+                "sector": stock_info["sector"],
+            }
+
+        aliases = [name, ticker]
+
+        # 시장별 거래소 suffix 자동 부여
+        if resolved_market == "kospi200":
+            aliases.append(f"{ticker}.KS")
+        elif resolved_market == "nikkei225":
+            aliases.append(f"{ticker}.T")
+        elif resolved_market == "sp500":
+            aliases.append(f"NASDAQ:{ticker}")
+            aliases.append(f"NYSE:{ticker}")
+
+        return {
+            "canonical": name,
+            "aliases": list(dict.fromkeys([a for a in aliases if a])),
+            "ticker": ticker,
+            "name": name,
+            "market_id": resolved_market,
+            "sector": stock_info["sector"],
+        }
+
+    # 4) fallback
+    aliases = [a for a in [target, ticker_raw] if a]
+    return {
+        "canonical": target or ticker_raw,
+        "aliases": list(dict.fromkeys(aliases)),
+        "ticker": ticker_raw,
+        "name": target,
+        "market_id": market_id,
+        "sector": "",
+    }
     
-    if direction == "bull":
-        tq = [f"{target} stock buy rating target price upgrade analyst",
-              f"{target}{sn} earnings beat revenue growth bullish",
-              f"{market_index} bull market rally forecast"]
-        eq = [f"Investment research bullish case {target} price target upside",
-              f"Expert analysis {target} stock outperform",
-              f"{target}{sn} undervalued catalyst growth analyst recommendation"]
-              
-    elif direction == "neutral":
-        tq = [f"{target} stock hold neutral rating mixed outlook",
-              f"{target} sideways range-bound uncertainty",
-              f"{market_index} flat market uncertainty"]
-        eq = [f"Why {target} fairly valued neutral balanced risks",
-              f"{target}{sn} wait cautious analyst",
-              f"{market_index} sideways market competing forces"]
-              
+# ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
+# ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
+def build_queries(target, direction, market_index, sector="", market_id="sp500", ticker_raw=""):
+    entity = normalize_entity(target, ticker_raw, market_id)
+    canonical = entity["canonical"]
+    aliases = entity["aliases"][:3]
+    alias_main = canonical
+    alias_or = " OR ".join([f'"{a}"' for a in aliases])
+
+    sector_txt = f" {sector}" if sector else ""
+    terms = DIRECTIONAL_TERMS.get(direction, {}).get(market_id, [])
+
+    # 방향성 핵심 키워드 3개 정도만 압축 사용
+    k1 = terms[0] if len(terms) > 0 else ""
+    k2 = terms[1] if len(terms) > 1 else ""
+    k3 = terms[2] if len(terms) > 2 else ""
+
+    if market_id == "kospi200":
+        tavily_queries = [
+            f'{alias_or} {k1} 증권사 리포트',
+            f'{alias_or} {k2} 목표주가 투자의견',
+            f'{alias_or}{sector_txt} {k3} 실적 전망',
+            f'{market_index} {k1} 전망'
+        ]
+        exa_queries = [
+            f'{alias_main} {k1} long thesis',
+            f'{alias_main} {k2} analyst report',
+            f'{alias_main}{sector_txt} {k3} valuation',
+            f'{alias_main} bullish bearish investment thesis' if direction == "neutral" else f'{alias_main} {k1} investment thesis'
+        ]
+    elif market_id == "nikkei225":
+        tavily_queries = [
+            f'{alias_or} {k1} アナリスト レポート',
+            f'{alias_or} {k2} 目標株価 投資判断',
+            f'{alias_or}{sector_txt} {k3} 業績 見通し',
+            f'{market_index} {k1} 見通し'
+        ]
+        exa_queries = [
+            f'{alias_main} {k1} long thesis',
+            f'{alias_main} {k2} analyst report',
+            f'{alias_main}{sector_txt} {k3} profitability',
+            f'{alias_main} investment thesis {direction}'
+        ]
     else:
-        tq = [f"{target} stock sell downgrade target price cut analyst",
-              f"{target}{sn} earnings miss decline bearish risk",
-              f"{market_index} market correction crash risk"]
-        eq = [f"Investment research bearish short thesis {target} downside",
-              f"Expert column {target} overvalued headwinds",
-              f"{target}{sn} structural decline disruption analysis"]
-              
-    return {"tavily": tq, "exa_report": eq, "exa_sns": _build_sns_queries(target, direction, market_id)}
+        tavily_queries = [
+            f'{alias_or} {k1} analyst note',
+            f'{alias_or} {k2} price target',
+            f'{alias_or}{sector_txt} {k3} earnings outlook',
+            f'{market_index} {k1} outlook'
+        ]
+        exa_queries = [
+            f'{alias_main} {k1} investment thesis',
+            f'{alias_main} {k2} analyst report',
+            f'{alias_main}{sector_txt} {k3} profitability outlook',
+            f'{alias_main} bull case' if direction == "bull" else
+            f'{alias_main} bear case' if direction == "bear" else
+            f'{alias_main} balanced outlook'
+        ]
+
+    sns_queries = _build_sns_queries(alias_main, direction, market_id)
+
+    return {
+        "entity": entity,
+        "tavily": tavily_queries,
+        "exa_report": exa_queries,
+        "exa_sns": sns_queries
+    }
 
 # ─── SEARCH FUNCTIONS ──────────────────────────────────────────────────────────
 def search_tavily(queries):
@@ -248,7 +473,7 @@ def search_tavily(queries):
 
 
 
-def search_exa_reports(queries, recent_days=90):
+def search_exa_reports(queries, entity_info=None, recent_days=120, market_id="sp500"):
     results = []
     seen = set()
 
@@ -256,34 +481,33 @@ def search_exa_reports(queries, recent_days=90):
         client = get_exa()
         start_date = (datetime.now() - timedelta(days=recent_days)).strftime("%Y-%m-%dT00:00:00.000Z")
 
+        domain_map = {
+            "sp500": ["sec.gov", "reuters.com", "bloomberg.com", "wsj.com", "seekingalpha.com", "marketwatch.com"],
+            "kospi200": ["dart.fss.or.kr", "fnguide.com", "hankyung.com", "mk.co.kr", "edaily.co.kr", "thebell.co.kr"],
+            "nikkei225": ["nikkei.com", "kabutan.jp", "minkabu.jp", "toyokeizai.net"]
+        }
+        include_domains = domain_map.get(market_id, [])
+
+        additional = []
+        if entity_info:
+            for a in entity_info.get("aliases", [])[:3]:
+                additional.extend([
+                    f"{a} investment thesis",
+                    f"{a} analyst report",
+                    f"{a} earnings release"
+                ])
+
         for q in queries:
             try:
-                # 짧고 모호한 질의 보정
-                q_clean = q.strip()
-                variations = []
-
-                if q_clean.upper() == "META":
-                    base_query = "Meta Platforms earnings report OR Meta Platforms investor relations OR Meta Platforms SEC filing"
-                    variations = [
-                        "Meta Platforms quarterly results",
-                        "Meta Platforms 10-Q OR 10-K OR earnings release",
-                        "NASDAQ:META investor relations"
-                    ]
-                    category = "financial_report"
-                else:
-                    base_query = q_clean
-                    variations = [q_clean]
-                    category = "company"
-
                 resp = client.search_and_contents(
-                    base_query,
+                    q,
                     type="deep",
-                    category=category,
-                    num_results=10,
-                    additional_queries=variations[:3],
+                    num_results=8,
                     start_published_date=start_date,
-                    highlights={"max_characters": 500},
-                    text={"max_characters": 1500},
+                    include_domains=include_domains if include_domains else None,
+                    additional_queries=additional[:6],
+                    highlights={"max_characters": 700},
+                    text={"max_characters": 1800},
                 )
 
                 if not resp or not getattr(resp, "results", None):
@@ -297,21 +521,23 @@ def search_exa_reports(queries, recent_days=90):
 
                     highlights = getattr(r, "highlights", None) or []
                     text = getattr(r, "text", "") or ""
-                    summary = " … ".join(highlights) if highlights else text[:800]
+                    summary = " … ".join(highlights) if highlights else text[:1000]
 
                     results.append({
                         "title": getattr(r, "title", "") or "검색 결과",
                         "url": url,
                         "content": summary,
-                        "date": getattr(r, "published_date", "") or ""
+                        "date": getattr(r, "published_date", "") or "",
+                        "engine": "exa"
                     })
 
             except Exception as e:
                 results.append({
-                    "title": f"🚨 Exa 개별 쿼리 오류 ({q[:20]})",
+                    "title": f"🚨 Exa 개별 쿼리 오류",
                     "url": "debug",
                     "content": str(e),
-                    "date": datetime.now().strftime("%Y-%m-%d")
+                    "date": datetime.now().strftime("%Y-%m-%d"),
+                    "engine": "exa"
                 })
 
     except Exception as e:
@@ -319,7 +545,8 @@ def search_exa_reports(queries, recent_days=90):
             "title": "🚨 Exa 클라이언트 초기화 실패",
             "url": "",
             "content": str(e),
-            "date": ""
+            "date": "",
+            "engine": "exa"
         })
 
     return results
@@ -331,12 +558,19 @@ def search_tavily_sns(queries, market_id="sp500"):
         client = get_tavily()
         seen = set()
         domains = _get_sns_domains(market_id)
+
         for q in queries:
             try:
-                resp = client.search(q, max_results=4, search_depth="basic") # 에러 방지를 위해 basic으로 통일
-                for r in resp.get("results",[]):
+                resp = client.search(
+                    q,
+                    max_results=4,
+                    search_depth="basic",
+                    include_domains=domains
+                )
+                for r in resp.get("results", []):
                     url = r.get("url") or ""
-                    if url in seen: continue
+                    if not url or url in seen:
+                        continue
                     seen.add(url)
                     results.append({
                         "title": r.get("title") or "",
@@ -346,9 +580,19 @@ def search_tavily_sns(queries, market_id="sp500"):
                         "platform": _detect_platform(url)
                     })
             except Exception as e:
-                results.append({"title": "🚨 Tavily SNS 에러", "url": "", "content": f"상세: {str(e)}", "date": datetime.now().strftime("%Y-%m-%d")})
+                results.append({
+                    "title": "🚨 Tavily SNS 에러",
+                    "url": "",
+                    "content": f"상세: {str(e)}",
+                    "date": datetime.now().strftime("%Y-%m-%d")
+                })
     except Exception as e:
-        results.append({"title": "🚨 Tavily SNS 클라이언트 에러", "url": "", "content": str(e), "date": ""})
+        results.append({
+            "title": "🚨 Tavily SNS 클라이언트 에러",
+            "url": "",
+            "content": str(e),
+            "date": ""
+        })
     return results
 
 def fetch_current_price(target, ticker_raw, market_id):
@@ -468,42 +712,42 @@ def _fetch_fmp(ticker, fmp_key, yr, yr_p):
     return f"【어닝콜: {ticker} Q{q} {y}】\n(Financial Modeling Prep)\n\n{text}"
 
 def combined_search(target, direction, market_index, sector="", ticker_raw="", market_id="sp500"):
-    qs = build_queries(target, direction, market_index, sector, market_id)
+    qs = build_queries(target, direction, market_index, sector, market_id, ticker_raw=ticker_raw)
     tr = search_tavily(qs["tavily"])
-    er = search_exa_reports(qs["exa_report"])
+    er = search_exa_reports(qs["exa_report"], entity_info=qs.get("entity"), recent_days=120, market_id=market_id)
     sr = search_tavily_sns(qs["exa_sns"], market_id=market_id)
     et = fetch_earnings_transcript(ticker_raw, target_name=target, market_id=market_id) if ticker_raw else "[지수 — 어닝콜 해당 없음]"
 
-    # 90일 커트라인 유지 (파이썬 날짜 파싱 에러 완벽 차단)
     cutoff_str = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
 
     def fmt(items, label, show_p=False):
-        if not items: return f"【{label}】\n결과 없음\n"
-        lines=[f"【{label}】"]
+        if not items:
+            return f"【{label}】\n결과 없음\n"
+        lines = [f"【{label}】"]
         valid_count = 0
-        
+
         for r in items:
-            date_str = r.get("date") or ""  
-            
-            # 90일 이전 데이터 깔끔하게 무시
+            date_str = r.get("date") or ""
             if date_str and len(date_str) >= 10 and date_str[:10] < cutoff_str:
-                continue 
+                continue
 
             valid_count += 1
             ds = f" ({date_str[:10]})" if date_str else ""
             pl = f"[{r.get('platform','')}] " if show_p and r.get("platform") else ""
             lines.append(f"■ {pl}{r.get('title','')}{ds}")
-            if r.get("url"): lines.append(f"  {r['url']}")
-            if r.get("content"): lines.append(f"  {r['content']}")
+            if r.get("url"):
+                lines.append(f"  {r['url']}")
+            if r.get("content"):
+                lines.append(f"  {r['content']}")
             lines.append("")
-            
+
         if valid_count == 0:
             return f"【{label}】\n최근 3개월 내 유의미한 결과 없음\n"
-            
+
         return "\n".join(lines)
 
-    dir_ko="강세" if direction=="bull" else "중립" if direction=="neutral" else "약세"
-    hdr=f"=== {target}[{dir_ko}] ({datetime.now().strftime('%Y-%m-%d')}) ===\n소스: Tavily+Exa+SNS+어닝콜\n"
+    dir_ko = "강세" if direction == "bull" else "중립" if direction == "neutral" else "약세"
+    hdr = f"=== {target}[{dir_ko}] ({datetime.now().strftime('%Y-%m-%d')}) ===\n소스: Tavily+Exa+SNS+어닝콜\n"
     return hdr + "\n\n".join([
         fmt(tr, "① 최신 뉴스·애널리스트"),
         fmt(er, "② 금융 리포트·칼럼"),
