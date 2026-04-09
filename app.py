@@ -429,7 +429,7 @@ def call_llm(system: str, user_content: str, max_tokens: int = 4000, market_id: 
     """
     ollama_url = get_ollama_url()
     model = get_ollama_model(market_id)
-    ollama_err = None  # 초기화
+    ollama_error_msg = ""  # ✅ 수정 1: 에러를 담아둘 안전한 변수를 만듭니다.
 
     # ── Ollama 시도 ────────────────────────────────────────────────────────────
     try:
@@ -444,15 +444,25 @@ def call_llm(system: str, user_content: str, max_tokens: int = 4000, market_id: 
         }
         headers = {"ngrok-skip-browser-warning": "true", "Content-Type": "application/json"}
         resp = requests.post(f"{ollama_url}/api/chat", json=payload, headers=headers, timeout=300)
+        
+        # ✅ 수정 2: 404 에러가 나면 Ollama가 보낸 진짜 원인(예: 모델 없음)을 잡아냅니다.
+        if resp.status_code != 200:
+            raise Exception(f"HTTP {resp.status_code}: {resp.text}")
+            
         resp.raise_for_status()
         return resp.json()["message"]["content"]
-    except Exception as ollama_err:
-        print(f"[Ollama 실패: {ollama_err}] → Anthropic API로 fallback")
+        
+    except Exception as e: 
+        # ✅ 수정 3: 파이썬 버그를 피해 에러 내용을 미리 안전한 변수에 복사해 둡니다.
+        ollama_error_msg = str(e)
+        print(f"[Ollama 실패: {ollama_error_msg}] → Anthropic API로 fallback")
 
     # ── Anthropic API fallback ─────────────────────────────────────────────────
     api_key = st.secrets.get("ANTHROPIC_API_KEY","") or next(iter(_BG_KEYS.values()), "")
     if not api_key:
-        return f"⚠️ LLM 호출 실패: Ollama 연결 불가 + Anthropic API 키 없음\nOllama 오류: {ollama_err}"
+        # ✅ 수정 4: 안전하게 복사해둔 에러 메시지를 출력합니다.
+        return f"⚠️ LLM 호출 실패: Ollama 연결 불가 + Anthropic API 키 없음\nOllama 상세 오류: {ollama_error_msg}"
+        
     try:
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
