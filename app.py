@@ -429,6 +429,7 @@ def call_llm(system: str, user_content: str, max_tokens: int = 4000, market_id: 
     """
     ollama_url = get_ollama_url()
     model = get_ollama_model(market_id)
+    ollama_err = None  # 초기화
 
     # ── Ollama 시도 ────────────────────────────────────────────────────────────
     try:
