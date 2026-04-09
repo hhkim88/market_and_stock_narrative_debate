@@ -244,21 +244,41 @@ def search_tavily(queries):
 
 def search_exa_reports(queries, recent_days=90):
     client = get_exa()
-    start = (datetime.now()-timedelta(days=recent_days)).strftime("%Y-%m-%dT00:00:00.000Z")
+    # Exa API가 요구하는 ISO 8601 포맷
+    start = (datetime.now() - timedelta(days=recent_days)).strftime("%Y-%m-%dT00:00:00.000Z")
     seen, results = set(), []
+    
     for q in queries:
         try:
-            resp = client.search_and_contents(q, num_results=4, use_autoprompt=True,
-                text={"max_characters":800}, highlights={"num_sentences":3,"highlights_per_url":2},
-                start_published_date=start, include_domains=EXA_FINANCIAL_DOMAINS)
+            # ✅ 수정 1: 에러를 유발할 수 있는 복잡한 딕셔너리(dict) 파라미터를 가장 안전한 True 모드로 변경
+            resp = client.search_and_contents(
+                q, 
+                num_results=4, 
+                use_autoprompt=True,
+                text=True,         # 텍스트 전체 가져오기 허용
+                highlights=True,   # 하이라이트 요약 가져오기 허용
+                start_published_date=start, 
+                include_domains=EXA_FINANCIAL_DOMAINS
+            )
+            
             for r in resp.results:
-                url = r.url or ""
-                if url in seen: continue
+                url = getattr(r, "url", "") or ""
+                if not url or url in seen: continue
                 seen.add(url)
-                hl = getattr(r,"highlights",[]) or []
-                content = " … ".join(hl) if hl else (getattr(r,"text","") or "")[:800]
-                results.append({"title":r.title or "","url":url,"content":content[:800],"date":r.published_date or ""})
-        except: pass
+                
+                hl = getattr(r, "highlights", []) or []
+                content = " … ".join(hl) if hl else (getattr(r, "text", "") or "")[:800]
+                
+                results.append({
+                    "title": getattr(r, "title", "") or "",
+                    "url": url,
+                    "content": content[:800],
+                    "date": getattr(r, "published_date", "") or ""
+                })
+        except Exception as e:
+            # 🚨 수정 2: 에러가 나면 무시하지 않고 터미널에 정확한 이유를 출력합니다.
+            print(f"[Exa API 실패] 쿼리: {q} \n에러 상세: {e}")
+            
     return results
 
 def search_tavily_sns(queries, market_id="sp500"):
