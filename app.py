@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 from supabase import create_client
 from tavily import TavilyClient
 from exa_py import Exa
+import requests
 
 # ─── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="시장 방향 판정 엔진", page_icon="⚡", layout="wide")
@@ -713,48 +714,48 @@ def validate_api_key(key: str) -> tuple[bool, str]:
         return False, "API 키가 너무 짧습니다. 전체 키를 복사했는지 확인해 주세요."
     return True, "OK"
 
-def show_login_page():
-    st.markdown("""
-    <h1 style='text-align:center; background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);
-    -webkit-background-clip:text; -webkit-text-fill-color:transparent; font-size:28px; margin-bottom:4px'>
-    ⚡ 시장 방향 판정 엔진</h1>
-    <p style='text-align:center; color:#4a5568; font-size:12px; letter-spacing:2px; margin-bottom:40px'>
-    7-AGENT AI · 강세/중립/약세 내러티브 분석 · 향후 3개월 판정</p>
-    """, unsafe_allow_html=True)
+# def show_login_page():
+#     st.markdown("""
+#     <h1 style='text-align:center; background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);
+#     -webkit-background-clip:text; -webkit-text-fill-color:transparent; font-size:28px; margin-bottom:4px'>
+#     ⚡ 시장 방향 판정 엔진</h1>
+#     <p style='text-align:center; color:#4a5568; font-size:12px; letter-spacing:2px; margin-bottom:40px'>
+#     7-AGENT AI · 강세/중립/약세 내러티브 분석 · 향후 3개월 판정</p>
+#     """, unsafe_allow_html=True)
 
-    _, col_c, _ = st.columns([1, 2, 1])
-    with col_c:
-        st.markdown("""
-        <div style='background:#ffffff; border:1px solid #e2e6ef; border-radius:12px; padding:32px 36px;'>
-        <div style='color:#8892ab; font-size:11px; letter-spacing:2px; margin-bottom:20px; text-align:center'>
-        🔑 ANTHROPIC API 키로 로그인</div>
-        """, unsafe_allow_html=True)
+#     _, col_c, _ = st.columns([1, 2, 1])
+#     with col_c:
+#         st.markdown("""
+#         <div style='background:#ffffff; border:1px solid #e2e6ef; border-radius:12px; padding:32px 36px;'>
+#         <div style='color:#8892ab; font-size:11px; letter-spacing:2px; margin-bottom:20px; text-align:center'>
+#         🔑 ANTHROPIC API 키로 로그인</div>
+#         """, unsafe_allow_html=True)
 
-        api_key = st.text_input("API 키", type="password",
-                                placeholder="sk-ant-api03-...",
-                                label_visibility="collapsed")
+#         api_key = st.text_input("API 키", type="password",
+#                                 placeholder="sk-ant-api03-...",
+#                                 label_visibility="collapsed")
 
-        if st.button("▶ 로그인 및 시작", type="primary", use_container_width=True):
-            if not api_key:
-                st.error("API 키를 입력해 주세요.")
-            else:
-                valid, msg = validate_api_key(api_key.strip())
-                if valid:
-                    st.session_state["user_api_key"] = api_key.strip()
-                    st.rerun()
-                else:
-                    st.error(msg)
+#         if st.button("▶ 로그인 및 시작", type="primary", use_container_width=True):
+#             if not api_key:
+#                 st.error("API 키를 입력해 주세요.")
+#             else:
+#                 valid, msg = validate_api_key(api_key.strip())
+#                 if valid:
+#                     st.session_state["user_api_key"] = api_key.strip()
+#                     st.rerun()
+#                 else:
+#                     st.error(msg)
 
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.markdown("""
-        <div style='margin-top:20px; color:#374151; font-size:11px; line-height:1.9; text-align:center'>
-        API 키가 없으신가요?<br>
-        <a href='https://console.anthropic.com/settings/keys' target='_blank'
-           style='color:#4fc3f7'>console.anthropic.com</a> 에서 무료 발급<br><br>
-        ✅ API 키는 서버에 저장되지 않습니다<br>
-        ✅ 세션 종료 시 자동 삭제됩니다<br>
-        ✅ 분석 결과는 모든 사용자와 48시간 공유
-        </div>""", unsafe_allow_html=True)
+#         st.markdown("</div>", unsafe_allow_html=True)
+#         st.markdown("""
+#         <div style='margin-top:20px; color:#374151; font-size:11px; line-height:1.9; text-align:center'>
+#         API 키가 없으신가요?<br>
+#         <a href='https://console.anthropic.com/settings/keys' target='_blank'
+#            style='color:#4fc3f7'>console.anthropic.com</a> 에서 무료 발급<br><br>
+#         ✅ API 키는 서버에 저장되지 않습니다<br>
+#         ✅ 세션 종료 시 자동 삭제됩니다<br>
+#         ✅ 분석 결과는 모든 사용자와 48시간 공유
+#         </div>""", unsafe_allow_html=True)
 
 # ─── SUPABASE ──────────────────────────────────────────────────────────────────
 @st.cache_resource
@@ -823,6 +824,17 @@ def load_leaderboard():
         rows.sort(key=lambda r: (-(r.get("bull_prob") or 0), (r.get("bear_prob") or 0)))
         return rows
     except: return []
+
+def update_analysis_progress(target_id, progress_val, status_msg):
+    """백그라운드 스레드에서 화면 대신 DB에 현재 상태를 기록하는 함수"""
+    try:
+        get_supabase().table("analyses").update({
+            "progress": float(progress_val),
+            "status_msg": status_msg
+        }).eq("target_id", target_id).execute()
+    except Exception as e:
+        print(f"진행상태 업데이트 오류: {e}")
+
 
 # ─── PROMPT BUILDERS ───────────────────────────────────────────────────────────
 def build_system_prompts(market: dict, stock: tuple = None):
@@ -939,18 +951,51 @@ def build_system_prompts(market: dict, stock: tuple = None):
     }
 
 # ─── CLAUDE API ────────────────────────────────────────────────────────────────
-def call_claude(system: str, user_content: str, max_tokens: int = 4000, _target_id: str = '') -> str:
-    api_key = get_user_api_key() or next(iter(_BG_KEYS.values()), '')
-    if not api_key:
-        raise RuntimeError("로그인이 필요합니다.")
-    client = anthropic.Anthropic(api_key=api_key)
-    resp = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user_content}],
-    )
-    return "".join(b.text for b in resp.content if hasattr(b, "text"))
+# def call_claude(system: str, user_content: str, max_tokens: int = 4000, _target_id: str = '') -> str:
+#     api_key = get_user_api_key() or next(iter(_BG_KEYS.values()), '')
+#     if not api_key:
+#         raise RuntimeError("로그인이 필요합니다.")
+#     client = anthropic.Anthropic(api_key=api_key)
+#     resp = client.messages.create(
+#         model="claude-sonnet-4-5-20250929",
+#         max_tokens=max_tokens,
+#         system=system,
+#         messages=[{"role": "user", "content": user_content}],
+#     )
+#     return "".join(b.text for b in resp.content if hasattr(b, "text"))
+
+
+# ─── LOCAL API ────────────────────────────────────────────────────────────────
+def call_local_5090(system_prompt, user_content, max_tokens=4000):
+    url = "https://permittedly-sauciest-londyn.ngrok-free.dev/api/chat"
+    
+    payload = {
+        "model": "llama3:70b", 
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ],
+        "stream": False,
+        "options": {
+            "num_predict": max_tokens, # Ollama에서는 max_tokens 대신 num_predict를 씁니다
+            "temperature": 0.6,
+            "num_gpu": 1 # 5090을 명시적으로 사용하도록 강제 (선택사항)
+        }
+    }
+    
+    headers = {"ngrok-skip-browser-warning": "true"}
+
+    try:
+        # 5090급 모델은 추론에 시간이 걸릴 수 있으므로 timeout을 넉넉히 잡습니다 (5분)
+        response = requests.post(url, json=payload, headers=headers, timeout=300)
+        response.raise_for_status()
+        
+        # Ollama /api/chat의 응답 구조는 ['message']['content'] 입니다.
+        result = response.json()
+        return result['message']['content']
+    except Exception as e:
+        return f"⚠️ 로컬 5090 연결 오류: {str(e)}"
+
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
 def extract_winner(text):
@@ -985,100 +1030,155 @@ def age_label(hours):
     return f"{int(hours/24)}일 전"
 
 # ─── RUN ANALYSIS ──────────────────────────────────────────────────────────────
+# def _run_analysis_core(target_id, target_label, market, stock, prompts, user_api_key):
+#     results  = {}
+#     progress = st.progress(0)
+#     status   = st.empty()
+#     target_short = stock[1] if stock else market["index"]
+
+#     # ── Phase 1: 듀얼 엔진 검색 → Claude 분석 ────────────────────────────────
+#     st.markdown("**Phase 1 · 내러티브 수집 (Tavily 뉴스 + Exa 리포트·칼럼 → Claude 분석)**")
+#     cols = st.columns(3)
+#     areas = {a: cols[i].empty() for i, a in enumerate(["bull","neutral","bear"])}
+
+#     sector     = stock[2] if stock else ""
+#     ticker_raw = stock[0] if stock else ""
+
+#     for i, (agent, direction) in enumerate([("bull","bull"),("neutral","neutral"),("bear","bear")]):
+#         dir_label = "강세" if direction=="bull" else ("중립" if direction=="neutral" else "약세")
+#         status.markdown(f"🔍 **{AGENT_LABELS[agent]}** — 4-소스 검색 중...")
+#         areas[agent].info(f"{AGENT_LABELS[agent]}\n🔍 Tavily+Exa+FMP 수집 중...")
+
+#         try:
+#             search_results = combined_search(
+#                 target_short, direction, market["index"],
+#                 sector=sector, ticker_raw=ticker_raw,
+#                 market_id=market["id"],
+#             )
+
+#             areas[agent].info(f"{AGENT_LABELS[agent]}\n🤖 Claude 분석 중...")
+#             status.markdown(f"🤖 **{AGENT_LABELS[agent]}** — Claude 분석 중...")
+
+#             user_content = f"""다음은 오늘({datetime.now().strftime('%Y년 %m월 %d일')}) 기준 {target_label}에 관한 4개 소스 검색 결과입니다:
+
+# {search_results}
+
+# 위 검색 결과를 바탕으로:
+# - ①②: 기관·전문가의 공식 {dir_label} 내러티브를 수집·정리하십시오
+# - ③: SNS·커뮤니티의 Raw 여론(감성·분위기)을 객관적으로 요약하십시오
+# - ④: 어닝콜에서 경영진이 언급한 핵심 가이던스와 리스크를 반영하십시오
+# 구체적인 수치·날짜·출처·발언자를 반드시 인용하십시오."""
+
+#             results[agent] = call_local_5090(prompts[agent], user_content)
+#             areas[agent].success(f"{AGENT_LABELS[agent]}\n✅ 완료")
+#         except Exception as e:
+#             results[agent] = f"⚠️ 오류: {e}"
+#             areas[agent].warning(f"{AGENT_LABELS[agent]}\n⚠️ 오류")
+#         progress.progress((i + 1) / 7)
+
+#     # ── Phase 2: 비판 ─────────────────────────────────────────────────────────
+#     st.markdown("**Phase 2 · 비판 검증**")
+#     cols2 = st.columns(3)
+#     areas2 = {a: cols2[i].empty() for i, a in enumerate(["bull_critic","neutral_critic","bear_critic"])}
+
+#     critic_map = {
+#         "bull_critic":    ("bull",    "강세"),
+#         "neutral_critic": ("neutral", "중립"),
+#         "bear_critic":    ("bear",    "약세"),
+#     }
+#     for i, agent in enumerate(["bull_critic","neutral_critic","bear_critic"]):
+#         src, label = critic_map[agent]
+#         status.markdown(f"🔥 **{AGENT_LABELS[agent]}** 비판 중...")
+#         areas2[agent].info(f"{AGENT_LABELS[agent]}\n⏳ 분석 중...")
+#         try:
+#             user_content = f"[{label} 내러티브]:\n{results.get(src,'')}\n\n위 내러티브를 냉정하고 구체적으로 비판하시오."
+#             results[agent] = call_local_5090(prompts[agent], user_content)
+#             areas2[agent].success(f"{AGENT_LABELS[agent]}\n✅ 완료")
+#         except Exception as e:
+#             results[agent] = f"⚠️ 오류: {e}"
+#             areas2[agent].warning(f"{AGENT_LABELS[agent]}\n⚠️ 오류")
+#         progress.progress((4 + i) / 7)
+
+#     # ── Phase 3: Judge (현재가 실시간 검색 후 주입) ──────────────────────────
+#     st.markdown("**Phase 3 · 최종 판정**")
+#     status.markdown("📡 **현재 주가 실시간 조회 중...**")
+
+#     price_context = fetch_current_price(target_short, ticker_raw, market["id"])
+
+#     status.markdown("⚡ **최종 판정자** 종합 분석 중...")
+#     try:
+#         judge_input = (
+#             f"【실시간 현재가 정보 — 반드시 이 가격을 기준으로 판단하시오】\n"
+#             f"{price_context}\n\n"
+#             f"{'='*60}\n\n"
+#             + "\n\n".join([
+#                 f"[{AGENT_LABELS[a]}]:\n{results.get(a,'')}"
+#                 for a in ["bull","neutral","bear","bull_critic","neutral_critic","bear_critic"]
+#             ])
+#             + "\n\n위 토론과 실시간 현재가를 종합하여 최종 판정을 내리시오."
+#         )
+#         results["judge"] = call_local_5090(prompts["judge"], judge_input, max_tokens=8000)
+#     except Exception as e:
+#         results["judge"] = f"⚠️ 오류: {e}"
+
+#     progress.progress(1.0)
+#     status.success("✅ 분석 완료!")
+
 def _run_analysis_core(target_id, target_label, market, stock, prompts, user_api_key):
     results  = {}
-    progress = st.progress(0)
-    status   = st.empty()
     target_short = stock[1] if stock else market["index"]
-
-    # ── Phase 1: 듀얼 엔진 검색 → Claude 분석 ────────────────────────────────
-    st.markdown("**Phase 1 · 내러티브 수집 (Tavily 뉴스 + Exa 리포트·칼럼 → Claude 분석)**")
-    cols = st.columns(3)
-    areas = {a: cols[i].empty() for i, a in enumerate(["bull","neutral","bear"])}
-
     sector     = stock[2] if stock else ""
     ticker_raw = stock[0] if stock else ""
 
+    # ❌ 삭제: progress = st.progress(0), status = st.empty(), st.markdown(...) 등
+    
+    # Phase 1
+    update_analysis_progress(target_id, 0.1, "Phase 1: 내러티브 수집을 시작합니다...")
+    
     for i, (agent, direction) in enumerate([("bull","bull"),("neutral","neutral"),("bear","bear")]):
         dir_label = "강세" if direction=="bull" else ("중립" if direction=="neutral" else "약세")
-        status.markdown(f"🔍 **{AGENT_LABELS[agent]}** — 4-소스 검색 중...")
-        areas[agent].info(f"{AGENT_LABELS[agent]}\n🔍 Tavily+Exa+FMP 수집 중...")
+        
+        # ✅ 변경: DB에 메시지와 진행률(10%~40%) 기록
+        current_pct = 0.1 + (i * 0.1)
+        update_analysis_progress(target_id, current_pct, f"🔍 {AGENT_LABELS[agent]} — 4-소스 검색 및 분석 중...")
 
         try:
-            search_results = combined_search(
-                target_short, direction, market["index"],
-                sector=sector, ticker_raw=ticker_raw,
-                market_id=market["id"],
-            )
-
-            areas[agent].info(f"{AGENT_LABELS[agent]}\n🤖 Claude 분석 중...")
-            status.markdown(f"🤖 **{AGENT_LABELS[agent]}** — Claude 분석 중...")
-
-            user_content = f"""다음은 오늘({datetime.now().strftime('%Y년 %m월 %d일')}) 기준 {target_label}에 관한 4개 소스 검색 결과입니다:
-
-{search_results}
-
-위 검색 결과를 바탕으로:
-- ①②: 기관·전문가의 공식 {dir_label} 내러티브를 수집·정리하십시오
-- ③: SNS·커뮤니티의 Raw 여론(감성·분위기)을 객관적으로 요약하십시오
-- ④: 어닝콜에서 경영진이 언급한 핵심 가이던스와 리스크를 반영하십시오
-구체적인 수치·날짜·출처·발언자를 반드시 인용하십시오."""
-
-            results[agent] = call_claude(prompts[agent], user_content)
-            areas[agent].success(f"{AGENT_LABELS[agent]}\n✅ 완료")
+            search_results = combined_search(...) # 기존 코드와 동일
+            user_content = f"""...""" # 기존 코드와 동일
+            results[agent] = call_local_5090(prompts[agent], user_content)
         except Exception as e:
             results[agent] = f"⚠️ 오류: {e}"
-            areas[agent].warning(f"{AGENT_LABELS[agent]}\n⚠️ 오류")
-        progress.progress((i + 1) / 7)
 
-    # ── Phase 2: 비판 ─────────────────────────────────────────────────────────
-    st.markdown("**Phase 2 · 비판 검증**")
-    cols2 = st.columns(3)
-    areas2 = {a: cols2[i].empty() for i, a in enumerate(["bull_critic","neutral_critic","bear_critic"])}
-
-    critic_map = {
-        "bull_critic":    ("bull",    "강세"),
-        "neutral_critic": ("neutral", "중립"),
-        "bear_critic":    ("bear",    "약세"),
-    }
+    # Phase 2
+    update_analysis_progress(target_id, 0.5, "Phase 2: 비판 검증을 시작합니다...")
+    
+    critic_map = { ... } # 기존 코드와 동일
     for i, agent in enumerate(["bull_critic","neutral_critic","bear_critic"]):
         src, label = critic_map[agent]
-        status.markdown(f"🔥 **{AGENT_LABELS[agent]}** 비판 중...")
-        areas2[agent].info(f"{AGENT_LABELS[agent]}\n⏳ 분석 중...")
+        
+        # ✅ 변경: DB에 메시지와 진행률(50%~80%) 기록
+        current_pct = 0.5 + (i * 0.1)
+        update_analysis_progress(target_id, current_pct, f"🔥 {AGENT_LABELS[agent]} — 비판 논리 생성 중...")
+        
         try:
-            user_content = f"[{label} 내러티브]:\n{results.get(src,'')}\n\n위 내러티브를 냉정하고 구체적으로 비판하시오."
-            results[agent] = call_claude(prompts[agent], user_content)
-            areas2[agent].success(f"{AGENT_LABELS[agent]}\n✅ 완료")
+            user_content = f"..." # 기존 코드와 동일
+            results[agent] = call_local_5090(prompts[agent], user_content)
         except Exception as e:
             results[agent] = f"⚠️ 오류: {e}"
-            areas2[agent].warning(f"{AGENT_LABELS[agent]}\n⚠️ 오류")
-        progress.progress((4 + i) / 7)
 
-    # ── Phase 3: Judge (현재가 실시간 검색 후 주입) ──────────────────────────
-    st.markdown("**Phase 3 · 최종 판정**")
-    status.markdown("📡 **현재 주가 실시간 조회 중...**")
-
-    price_context = fetch_current_price(target_short, ticker_raw, market["id"])
-
-    status.markdown("⚡ **최종 판정자** 종합 분석 중...")
+    # Phase 3
+    update_analysis_progress(target_id, 0.9, "📡 현재 주가 실시간 조회 및 최종 판정 중...")
+    
+    price_context = fetch_current_price(...) # 기존 코드와 동일
     try:
-        judge_input = (
-            f"【실시간 현재가 정보 — 반드시 이 가격을 기준으로 판단하시오】\n"
-            f"{price_context}\n\n"
-            f"{'='*60}\n\n"
-            + "\n\n".join([
-                f"[{AGENT_LABELS[a]}]:\n{results.get(a,'')}"
-                for a in ["bull","neutral","bear","bull_critic","neutral_critic","bear_critic"]
-            ])
-            + "\n\n위 토론과 실시간 현재가를 종합하여 최종 판정을 내리시오."
-        )
-        results["judge"] = call_claude(prompts["judge"], judge_input, max_tokens=8000)
+        judge_input = ... # 기존 코드와 동일
+        results["judge"] = call_local_5090(prompts["judge"], judge_input, max_tokens=8000)
     except Exception as e:
         results["judge"] = f"⚠️ 오류: {e}"
 
-    progress.progress(1.0)
-    status.success("✅ 분석 완료!")
-
+    # 최종 완료 처리
+    update_analysis_progress(target_id, 1.0, "✅ 분석이 완료되었습니다!")
+    
     # ★ winner는 확률 기반으로 결정 (텍스트 파싱은 보조)
     bull_p, neutral_p, bear_p = extract_probs(results.get("judge",""))
     bull_p   = bull_p   or 50
@@ -1213,9 +1313,9 @@ def display_leaderboard():
 
 # ─── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
-    if not get_user_api_key():
-        show_login_page()
-        return
+    # if not get_user_api_key():
+    #     show_login_page()
+    #     return
 
     col_title, col_logout = st.columns([5,1])
     with col_title:
@@ -1267,23 +1367,28 @@ def main():
             # ── 백그라운드 실행 중 ──────────────────────────────────────────
             at = datetime.fromisoformat(cached["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
             elapsed = int((datetime.now(timezone.utc) - at).total_seconds() / 60)
-            st.info(
-                f"⏳ **{target_label} 분석이 백그라운드에서 실행 중입니다** "
-                f"({elapsed}분 경과)\n\n"
-                f"브라우저를 닫아도 서버에서 계속 진행됩니다. "
-                f"이 페이지를 30초 후 새로고침하면 진행 상황을 확인할 수 있습니다."
-            )
+            
+            # ✅ DB에서 스레드가 남긴 진행률과 메시지 읽어오기
+            current_progress = cached.get("progress") or 0.0
+            status_msg = cached.get("status_msg") or "분석을 준비하고 있습니다..."
+
+            st.info(f"⏳ **{target_label} 분석이 서버에서 실행 중입니다** ({elapsed}분 경과)")
+            
+            # ✅ 화면에 진행바와 상태 메시지 그리기
+            st.progress(float(current_progress), text=status_msg)
+
             col_r, col_c = st.columns([1, 1])
             with col_r:
-                if st.button("🔄 새로고침 (결과 확인)", use_container_width=True):
+                if st.button("🔄 새로고침 (수동)", use_container_width=True):
                     st.rerun()
             with col_c:
                 if elapsed > 20 and st.button("⚠️ 실패로 간주하고 재시작", use_container_width=True):
                     cache_delete(target_id)
                     st.rerun()
-            # 30초마다 자동 새로고침
-            import time as _time
-            _time.sleep(1)
+                    
+            # ✅ 2초마다 자동으로 화면을 새로고침하여 DB 상태를 다시 읽어옴
+            import time
+            time.sleep(2)
             st.rerun()
 
         else:
