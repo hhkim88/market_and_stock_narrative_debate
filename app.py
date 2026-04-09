@@ -237,7 +237,9 @@ def search_tavily(queries):
                 if url in seen: continue
                 seen.add(url)
                 results.append({"title":r.get("title",""),"url":url,"content":r.get("content","")[:700],"date":r.get("published_date","")})
-        except: pass
+        except Exception as e: 
+            # 조용히 넘어가지 않고 터미널에 에러 원인 출력
+            print(f"[Tavily 검색 실패] {e}")
     return results
 
 def search_exa_reports(queries, recent_days=90):
