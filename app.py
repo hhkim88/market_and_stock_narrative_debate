@@ -248,44 +248,58 @@ def search_tavily(queries):
 
 def search_exa_reports(queries, recent_days=90):
     results = []
-    try:
-        client = get_exa()
-        seen = set()
-        
-        for q in queries:
-            try:
-                # ✅ 가장 원초적이고 안전한 형태로 호출 (에러 유발 옵션 싹 제거)
-                resp = client.search_and_contents(
-                    q, 
-                    num_results=3, 
-                    use_autoprompt=True
-                )
+    client = get_exa()
+    seen = set()
+    
+    # ✅ 1. 2026년 현재 시간 기준 90일 전 ISO 날짜 생성
+    start_date = (datetime.now() - timedelta(days=recent_days)).strftime("%Y-%m-%dT00:00:00.000Z")
+    
+    for q in queries:
+        try:
+            # ✅ 2. 검색 범위와 정확도 밸런스 조정
+            resp = client.search_and_contents(
+                q, 
+                num_results=5,          # 검색 결과 수를 조금 늘림
+                use_autoprompt=True,    # 자연어 쿼리 최적화
+                start_published_date=start_date, # 최근 3개월 데이터만!
+                # 💡 Tavily가 안 될 때는 범위를 너무 좁히면 결과가 0건일 수 있으므로 
+                # 도메인 제한은 선택적으로 사용하거나, 중요한 것만 포함합니다.
+                include_domains=EXA_FINANCIAL_DOMAINS, 
+                text={"max_characters": 1000} # LLM 분석용 충분한 텍스트 확보
+            )
+            
+            if not resp.results:
+                continue
+
+            for r in resp.results:
+                url = getattr(r, "url", "") or ""
+                if not url or url in seen: continue
+                seen.add(url)
                 
-                for r in resp.results:
-                    url = getattr(r, "url", "") or ""
-                    if not url or url in seen: continue
-                    seen.add(url)
-                    
-                    hl = getattr(r, "highlights", []) or []
-                    content = " … ".join(hl) if hl else (getattr(r, "text", "") or "")[:800]
-                    
-                    results.append({
-                        "title": getattr(r, "title", "") or "",
-                        "url": url,
-                        "content": content[:800],
-                        "date": getattr(r, "published_date", "") or ""
-                    })
-            except Exception as e:
-                # 🚨 Exa 에러를 기사 내용인 것처럼 위장!
+                # ✅ 3. 데이터 추출 로직 보강
+                content = getattr(r, "text", "") or ""
+                # 하이라이트가 있다면 우선 사용, 없다면 본문 상단 사용
+                hl = getattr(r, "highlights", []) or []
+                summary = " … ".join(hl) if hl else content[:800]
+                
                 results.append({
-                    "title": f"🚨 Exa API 에러 ({q})", 
-                    "url": "디버그 모드", 
-                    "content": f"에러 상세 내용: {str(e)}", 
-                    "date": datetime.now().strftime("%Y-%m-%d")
+                    "title": getattr(r, "title", "제목 없음") or "제목 없음",
+                    "url": url,
+                    "content": summary,
+                    "date": getattr(r, "published_date", "") or ""
                 })
-    except Exception as e:
-        results.append({"title": "🚨 Exa 클라이언트 초기화 에러", "url": "", "content": str(e), "date": ""})
-        
+                
+        except Exception as e:
+            # 🚨 디버깅을 위해 에러 메시지 기록 (LLM에게 전달됨)
+            error_msg = str(e)
+            print(f"Exa Query Error ({q}): {error_msg}") # 서버 로그용
+            results.append({
+                "title": f"🚨 Exa 검색 지연/오류 ({q[:20]}...)", 
+                "url": "error", 
+                "content": f"상세 원인: {error_msg}", 
+                "date": datetime.now().strftime("%Y-%m-%d")
+            })
+            
     return results
 
 def search_tavily_sns(queries, market_id="sp500"):
