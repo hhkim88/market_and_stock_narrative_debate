@@ -91,40 +91,162 @@ MARKETS = {
 
 STOCKS = {
     "kospi200": [
-        ("005930","삼성전자","반도체"), ("000660","SK하이닉스","반도체"),
-        ("207940","삼성바이오로직스","바이오"), ("005380","현대자동차","자동차"),
-        ("000270","기아","자동차"), ("051910","LG화학","화학"),
-        ("035420","NAVER","인터넷"), ("035720","카카오","인터넷"),
-        ("068270","셀트리온","바이오"), ("105560","KB금융","금융"),
-        ("055550","신한지주","금융"), ("032830","삼성생명","보험"),
-        ("012330","현대모비스","자동차부품"), ("003550","LG","지주사"),
-        ("066570","LG전자","전자"), ("028260","삼성물산","건설"),
-        ("096770","SK이노베이션","에너지"), ("034730","SK","지주사"),
-        ("003490","대한항공","항공"), ("009830","한화솔루션","에너지"),
+        ("005930","삼성전자","반도체"),
+        ("000660","SK하이닉스","반도체"),
+        ("207940","삼성바이오로직스","바이오"),
+        ("005380","현대자동차","자동차"),
+        ("000270","기아","자동차"),
+        ("051910","LG화학","화학"),
+        ("035420","NAVER","인터넷"),
+        ("035720","카카오","인터넷"),
+        ("068270","셀트리온","바이오"),
+        ("105560","KB금융","금융"),
+        ("055550","신한지주","금융"),
+        ("032830","삼성생명","보험"),
+        ("012330","현대모비스","자동차부품"),
+        ("003550","LG","지주사"),
+        ("066570","LG전자","전자"),
+        ("028260","삼성물산","건설"),
+        ("096770","SK이노베이션","에너지"),
+        ("034730","SK","지주사"),
+        ("003490","대한항공","항공"),
+        ("009830","한화솔루션","에너지"),
+        ("017670","SK텔레콤","통신"),
+        ("030200","KT","통신"),
+        ("086790","하나금융지주","금융"),
+        ("010950","S-Oil","정유"),
+        ("015760","한국전력","유틸리티"),
+        ("018260","삼성에스디에스","IT서비스"),
+        ("011200","HMM","해운"),
+        ("259960","크래프톤","게임"),
+        ("329180","HD현대중공업","조선"),
+        ("042700","한미반도체","반도체장비"),
+        ("064350","현대로템","방산/철도"),
+        ("034020","두산에너빌리티","에너지설비"),
+        ("010140","삼성중공업","조선"),
+        ("267260","HD현대일렉트릭","전력기기"),
+        ("009540","HD한국조선해양","조선"),
+        ("000810","삼성화재","보험"),
+        ("316140","우리금융지주","금융"),
+        ("024110","기업은행","은행"),
+        ("006400","삼성SDI","배터리"),
+        ("373220","LG에너지솔루션","배터리"),
+        ("035250","강원랜드","레저"),
+        ("251270","넷마블","게임"),
+        ("047050","포스코인터내셔널","상사/에너지"),
+        ("005490","POSCO홀딩스","철강"),
+        ("000100","유한양행","제약"),
+        ("196170","알테오젠","바이오"),
+        ("145020","휴젤","바이오"),
+        ("090430","아모레퍼시픽","화장품"),
+        ("161390","한국타이어앤테크놀로지","타이어"),
+        ("071050","한국금융지주","증권")
     ],
+
     "sp500": [
-        ("AAPL","Apple","Technology"), ("MSFT","Microsoft","Technology"),
-        ("NVDA","NVIDIA","Semiconductors"), ("AMZN","Amazon","Consumer/Cloud"),
-        ("GOOGL","Alphabet","Internet"), ("META","Meta","Social Media"),
-        ("TSLA","Tesla","EV/Energy"), ("BRK.B","Berkshire","Financials"),
-        ("JPM","JPMorgan","Banking"), ("V","Visa","Payments"),
-        ("UNH","UnitedHealth","Healthcare"), ("XOM","ExxonMobil","Energy"),
-        ("JNJ","J&J","Healthcare"), ("WMT","Walmart","Retail"),
-        ("MA","Mastercard","Payments"), ("PG","P&G","Consumer"),
-        ("HD","Home Depot","Retail"), ("BAC","Bank of America","Banking"),
-        ("AVGO","Broadcom","Semiconductors"), ("LLY","Eli Lilly","Pharma"),
+        ("AAPL","Apple","Technology"),
+        ("MSFT","Microsoft","Technology"),
+        ("NVDA","NVIDIA","Semiconductors"),
+        ("AMZN","Amazon","Consumer/Cloud"),
+        ("GOOGL","Alphabet","Internet"),
+        ("META","Meta","Social Media"),
+        ("TSLA","Tesla","EV/Energy"),
+        ("BRK.B","Berkshire","Financials"),
+        ("JPM","JPMorgan","Banking"),
+        ("V","Visa","Payments"),
+        ("UNH","UnitedHealth","Healthcare"),
+        ("XOM","ExxonMobil","Energy"),
+        ("JNJ","J&J","Healthcare"),
+        ("WMT","Walmart","Retail"),
+        ("MA","Mastercard","Payments"),
+        ("PG","P&G","Consumer"),
+        ("HD","Home Depot","Retail"),
+        ("BAC","Bank of America","Banking"),
+        ("AVGO","Broadcom","Semiconductors"),
+        ("LLY","Eli Lilly","Pharma"),
+        ("COST","Costco","Retail"),
+        ("ABBV","AbbVie","Pharma"),
+        ("MRK","Merck","Pharma"),
+        ("PEP","PepsiCo","Consumer"),
+        ("KO","Coca-Cola","Consumer"),
+        ("ADBE","Adobe","Software"),
+        ("CRM","Salesforce","Software"),
+        ("NFLX","Netflix","Media"),
+        ("AMD","AMD","Semiconductors"),
+        ("CSCO","Cisco","Networking"),
+        ("TMO","Thermo Fisher","Life Science"),
+        ("ORCL","Oracle","Software"),
+        ("MCD","McDonald's","Consumer"),
+        ("NKE","Nike","Apparel"),
+        ("ACN","Accenture","IT Services"),
+        ("LIN","Linde","Materials"),
+        ("DHR","Danaher","Life Science"),
+        ("TXN","Texas Instruments","Semiconductors"),
+        ("QCOM","Qualcomm","Semiconductors"),
+        ("INTU","Intuit","Software"),
+        ("AMGN","Amgen","Biotech"),
+        ("INTC","Intel","Semiconductors"),
+        ("GE","GE Aerospace","Aerospace"),
+        ("CAT","Caterpillar","Industrials"),
+        ("NOW","ServiceNow","Software"),
+        ("IBM","IBM","Technology"),
+        ("PM","Philip Morris","Consumer"),
+        ("GS","Goldman Sachs","Financials"),
+        ("PLTR","Palantir","Software"),
+        ("UBER","Uber","Platform")
     ],
+
     "nikkei225": [
-        ("7203","トヨタ自動車","自動車"), ("6758","ソニーグループ","電子"),
-        ("9984","ソフトバンクG","通信/投資"), ("8306","三菱UFJ FG","銀行"),
-        ("6861","キーエンス","電子機器"), ("6367","ダイキン工業","空調"),
-        ("4063","信越化学","化学"), ("7974","任天堂","ゲーム"),
-        ("6501","日立製作所","電機"), ("6702","富士通","IT"),
-        ("8035","東京エレクトロン","半導体装置"), ("7267","ホンダ","自動車"),
-        ("2914","日本たばこ","食品"), ("9432","NTT","通信"),
-        ("8411","みずほFG","銀行"), ("4502","武田薬品","製薬"),
-        ("6971","京セラ","電子部品"), ("7751","キヤノン","光学"),
-        ("6954","ファナック","ロボット"), ("3382","セブン&アイ","小売"),
+        ("7203","토요타자동차","자동차"),
+        ("6758","소니그룹","전자/엔터"),
+        ("9984","소프트뱅크그룹","통신/투자"),
+        ("8306","미쓰비시UFJ파이낸셜그룹","은행"),
+        ("6861","키엔스","전자기기"),
+        ("6367","다이킨공업","공조"),
+        ("4063","신에츠화학","화학"),
+        ("7974","닌텐도","게임"),
+        ("6501","히타치제작소","전기/인프라"),
+        ("6702","후지쯔","IT"),
+        ("8035","도쿄일렉트론","반도체장비"),
+        ("7267","혼다","자동차"),
+        ("2914","일본담배산업","소비재"),
+        ("9432","NTT","통신"),
+        ("8411","미즈호파이낸셜그룹","은행"),
+        ("4502","다케다약품공업","제약"),
+        ("6971","교세라","전자부품"),
+        ("7751","캐논","광학/전자"),
+        ("6954","화낙","로봇"),
+        ("3382","세븐앤아이홀딩스","소매"),
+        ("9983","패스트리테일링","의류"),
+        ("6098","리크루트홀딩스","인력/플랫폼"),
+        ("8766","도쿄해상홀딩스","보험"),
+        ("8058","미쓰비시상사","종합상사"),
+        ("8001","이토추상사","종합상사"),
+        ("8031","미쓰이물산","종합상사"),
+        ("8053","스미토모상사","종합상사"),
+        ("9433","KDDI","통신"),
+        ("9434","소프트뱅크","통신"),
+        ("9020","JR동일본","철도"),
+        ("9022","JR도카이","철도"),
+        ("9021","JR서일본","철도"),
+        ("2802","아지노모토","식품"),
+        ("4543","데루모","의료기기"),
+        ("4519","주가이제약","제약"),
+        ("4568","다이이치산쿄","제약"),
+        ("6594","니덱","전기모터"),
+        ("6723","르네사스일렉트로닉스","반도체"),
+        ("7741","HOYA","광학/의료"),
+        ("7733","올림푸스","의료기기"),
+        ("4901","후지필름홀딩스","헬스케어/소재"),
+        ("6503","미쓰비시전기","전기"),
+        ("8015","도요타통상","종합상사"),
+        ("8801","미쓰이부동산","부동산"),
+        ("6857","어드반테스트","반도체장비/테스트"),
+        ("6762","TDK","전자부품"),
+        ("7201","닛산자동차","자동차"),
+        ("7269","스즈키","자동차"),
+        ("2502","아사히그룹홀딩스","식음료"),
+        ("4452","가오","생활용품")
     ],
 }
 
@@ -383,82 +505,6 @@ def normalize_entity(target: str, ticker_raw: str = "", market_id: str = "sp500"
     }
     
 # ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
-def build_queries(target, direction, market_index, sector="", market_id="sp500", ticker_raw=""):
-    entity = normalize_entity(target, ticker_raw, market_id)
-    canonical = entity["canonical"]
-    aliases = entity["aliases"][:4]
-    alias_main = canonical
-    alias_or = " OR ".join([f'"{a}"' for a in aliases])
-    sector_txt = f" {sector}" if sector else ""
-
-    if market_id == "kospi200":
-        tavily_queries = [
-            f'{alias_or} 최근 뉴스 사업 전략 경쟁 리스크',
-            f'{alias_or}{sector_txt} 실적 발표 수익성 수요 마진',
-            f'{alias_or} 투자 포인트 우려 요인',
-            f'{market_index} 최근 전망 거시 수급 금리 환율'
-        ]
-        exa_queries = [
-            f'{alias_main} investment thesis strategy risk catalyst',
-            f'{alias_main} earnings release investor relations profitability',
-            f'{alias_main}{sector_txt} competition demand margin capex',
-            f'{alias_main} regulatory risk execution narrative'
-        ]
-        quant_queries = [
-            f'{alias_or} 매출 영업이익 영업이익률 순이익 EPS 전망',
-            f'{alias_or} 가이던스 CAPEX 수주 backlog 신규수주',
-            f'{alias_or} 공시 실적 발표 수치 YoY QoQ',
-            f'{alias_or} 사업보고서 분기보고서 주석 수치'
-        ]
-    elif market_id == "nikkei225":
-        tavily_queries = [
-            f'{alias_or} 最新ニュース 事業戦略 競争 リスク',
-            f'{alias_or}{sector_txt} 決算 収益性 需要 マージン',
-            f'{alias_or} 投資ポイント 懸念材料',
-            f'{market_index} 見通し 金利 為替 マクロ'
-        ]
-        exa_queries = [
-            f'{alias_main} investment thesis strategy risk catalyst',
-            f'{alias_main} earnings release investor relations profitability',
-            f'{alias_main}{sector_txt} competition demand margin capex',
-            f'{alias_main} regulatory risk execution narrative'
-        ]
-        quant_queries = [
-            f'{alias_or} 売上 営業利益 EPS ガイダンス',
-            f'{alias_or} CAPEX 受注 backlog 需要',
-            f'{alias_or} 決算短信 数値 YoY QoQ',
-            f'{alias_or} 有価証券報告書 注記 数値'
-        ]
-    else:
-        tavily_queries = [
-            f'{alias_or} latest news strategy competition risk',
-            f'{alias_or}{sector_txt} earnings profitability demand margins',
-            f'{alias_or} key debate catalysts concerns',
-            f'{market_index} latest outlook macro rates positioning'
-        ]
-        exa_queries = [
-            f'{alias_main} investment thesis strategy risk catalyst',
-            f'{alias_main} earnings release investor relations profitability',
-            f'{alias_main}{sector_txt} competition demand margin capex',
-            f'{alias_main} regulatory risk execution narrative'
-        ]
-        quant_queries = [
-            f'{alias_or} revenue operating margin EPS guidance YoY QoQ',
-            f'{alias_or} capex bookings backlog order demand numbers',
-            f'{alias_or} annual report 10-Q 10-K financial metrics',
-            f'{alias_or} notes to financial statements quantitative disclosure'
-        ]
-
-    sns_queries = _build_sns_queries(alias_main, "neutral", market_id)
-
-    return {
-        "entity": entity,
-        "tavily": tavily_queries,
-        "exa_report": exa_queries,
-        "exa_sns": sns_queries,
-        "quant": quant_queries
-    }
-
 def build_queries(target, direction, market_index, sector="", market_id="sp500", ticker_raw=""):
     entity = normalize_entity(target, ticker_raw, market_id)
     canonical = entity["canonical"]
@@ -1563,7 +1609,7 @@ def main():
 
     st.markdown("### STEP 2 · 분석 대상")
     stocks = STOCKS[market["id"]]
-    options = ["📊 지수 전체"] + [f"{t} · {n} ({s})" for t,n,s in stocks]
+    options = ["📊 지수 전체"] + [f"{n} · {t} ({s})" for t,n,s in stocks]
     choice = st.selectbox("",options,label_visibility="collapsed")
 
     if choice == "📊 지수 전체":
