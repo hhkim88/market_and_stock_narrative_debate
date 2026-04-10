@@ -69,24 +69,50 @@ def get_ollama_model(market_id: str = "sp500") -> str:
     return st.secrets.get(secret_key, DEFAULT_MODELS.get(market_id, "gemma3:27b"))
 
 MARKETS = {
-    "🇰🇷 KOSPI 200": {
-        "id": "kospi200", "flag": "🇰🇷", "color": "#4fc3f7",
-        "index": "KOSPI 200", "region": "한국",
-        "central_bank": "한국은행(BOK)", "currency": "원화(KRW)",
+    "🇰🇷 한국 시장": {
+        "id": "kospi200",
+        "flag": "🇰🇷",
+        "color": "#4fc3f7",
+        "index": "KOSPI 200",
+        "region": "한국",
+        "central_bank": "한국은행(BOK)",
+        "currency": "원화(KRW)",
         "analysts": "국내외 증권사 애널리스트",
     },
-    "🇺🇸 S&P 500": {
-        "id": "sp500", "flag": "🇺🇸", "color": "#00e87a",
-        "index": "S&P 500", "region": "미국",
-        "central_bank": "연준(Fed)", "currency": "달러(USD)",
+    "🇺🇸 미국 시장": {
+        "id": "sp500",
+        "flag": "🇺🇸",
+        "color": "#00e87a",
+        "index": "S&P 500",
+        "region": "미국",
+        "central_bank": "연준(Fed)",
+        "currency": "달러(USD)",
         "analysts": "월스트리트 애널리스트",
     },
-    "🇯🇵 닛케이 225": {
-        "id": "nikkei225", "flag": "🇯🇵", "color": "#ff7043",
-        "index": "닛케이 225", "region": "일본",
-        "central_bank": "일본은행(BOJ)", "currency": "엔화(JPY)",
+    "🇯🇵 일본 시장": {
+        "id": "nikkei225",
+        "flag": "🇯🇵",
+        "color": "#ff7043",
+        "index": "닛케이 225",
+        "region": "일본",
+        "central_bank": "일본은행(BOJ)",
+        "currency": "엔화(JPY)",
         "analysts": "일본 및 글로벌 증권사 애널리스트",
     },
+}
+
+INDEX_OPTIONS = {
+    "kospi200": [
+        ("index_kospi200", "KOSPI 200"),
+        ("index_kosdaq150", "KOSDAQ 150"),
+    ],
+    "sp500": [
+        ("index_sp500", "S&P 500"),
+        ("index_nasdaq100", "NASDAQ 100"),
+    ],
+    "nikkei225": [
+        ("index_nikkei225", "닛케이 225"),
+    ],
 }
 
 STOCKS = {
@@ -1623,19 +1649,33 @@ def main():
     market = MARKETS[mc]
 
     st.markdown("### STEP 2 · 분석 대상")
+    
     stocks = STOCKS[market["id"]]
-    options = ["📊 지수 전체"] + [f"{n} · {t} ({s})" for t, n, s in stocks]
+    indices = INDEX_OPTIONS.get(market["id"], [])
+    
+    index_options = [f"📊 {label} Index" for _, label in indices]
+    stock_options = [f"{n} · {t} ({s})" for t, n, s in stocks]
+    options = index_options + stock_options
+    
     choice = st.selectbox(
-        f"선택 가능한 대상: {len(stocks)}개 종목 + 지수 전체",
+        f"선택 가능한 대상: 지수 {len(indices)}개 + 종목 {len(stocks)}개",
         options,
         label_visibility="collapsed"
     )
     
-    if choice == "📊 지수 전체":
-        stock, target_id = None, market["id"]
-        target_label = f"{market['flag']} {market['index']}"
+    selected_market = market.copy()
+    
+    if choice in index_options:
+        idx = index_options.index(choice)
+        index_code, index_label = indices[idx]
+    
+        stock = None
+        target_id = f"{market['id']}_{index_code}"
+        target_label = f"{market['flag']} {index_label}"
+        selected_market["index"] = index_label
+    
     else:
-        idx = options.index(choice) - 1
+        idx = stock_options.index(choice)
         stock = stocks[idx]
         target_id = f"{market['id']}_{stock[0]}"
         target_label = f"{stock[1]} ({stock[0]})"
@@ -1718,17 +1758,17 @@ def main():
             if st.button(f"▶ {target_label} 분석 시작", type="primary", use_container_width=True):
                 st.session_state.pop("show_results",None)
                 st.session_state.pop("loaded_target_id", None)
-                prompts = build_system_prompts(market, stock)
-                cache_set_running(target_id, market["id"], target_label)
+                prompts = build_system_prompts(selected_market, stock)
+                cache_set_running(target_id, selected_market["id"], target_label)
 
                 def _bg_task():
                     _BG_KEYS[target_id] = ""
                     try:
-                        _run_analysis_core(target_id, target_label, market, stock, prompts)
+                        _run_analysis_core(target_id, target_label, selected_market, stock, prompts)
                     except Exception as e:
                         print(f"백그라운드 오류 [{target_id}]: {e}")
                         try:
-                            cache_set(target_id, market["id"], target_label, {}, "unknown",
+                            cache_set(target_id, selected_market["id"], target_label, {}, "unknown",
                                       status="done")
                         except: pass
                     finally:
