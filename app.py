@@ -544,6 +544,16 @@ def normalize_entity(target: str, ticker_raw: str = "", market_id: str = "sp500"
     }
     
 # ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
+def build_naver_queries(target, ticker):
+    return [
+        f"{target} 매수 목표주가 상향 강세",
+        f"{target} 중립 보합 관망 횡보",
+        f"{target} 매도 목표주가 하향 리스크",
+        f"{target} 실적 영업이익 매출 전망",
+        f"{target} 증권사 주가 전망",
+        f"{ticker} {target} 공시 IR"
+    ]
+
 def build_queries(target, direction, market_index, sector="", market_id="sp500", ticker_raw=""):
     entity = normalize_entity(target, ticker_raw, market_id)
     canonical = entity["canonical"]
@@ -992,84 +1002,77 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
     qs = build_queries(target, direction, market_index, sector, market_id, ticker_raw=ticker_raw)
 
     tr = search_tavily(qs["tavily"])
-    er = search_exa_reports(
-        qs["exa_report"],
-        entity_info=qs.get("entity"),
-        recent_days=120,
-        market_id=market_id
-    )
+    er = search_exa_reports(qs["exa_report"], entity_info=qs.get("entity"), recent_days=120, market_id=market_id)
     sr = search_tavily_sns(qs["exa_sns"], market_id=market_id)
-    qr = collect_quant_evidence(
-        qs["quant"],
-        entity_info=qs.get("entity"),
-        market_id=market_id
-    )
+    qr = collect_quant_evidence(qs["quant"], entity_info=qs.get("entity"), market_id=market_id)
     et = fetch_earnings_transcript(ticker_raw, target_name=target, market_id=market_id) if ticker_raw else "[지수 — 어닝콜 해당 없음]"
     fs = fetch_fmp_financial_snapshot(ticker_raw, market_id=market_id) if ticker_raw else None
+
+    nr = []
+    if market_id == "kospi200":
+        naver_qs = build_naver_queries(target, ticker_raw)
+        nr = search_naver_news(naver_qs)
 
     cutoff_str = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
 
     def fmt(items, label, show_p=False):
-        if not items:
-            return f"【{label}】\n결과 없음\n"
+        if not items: return f"【{label}】\n결과 없음\n"
         lines = [f"【{label}】"]
         valid_count = 0
-
         for r in items:
             date_str = r.get("date") or ""
-            if date_str and len(date_str) >= 10 and date_str[:10] < cutoff_str:
-                continue
-
+            if date_str and len(date_str) >= 10 and date_str[:10] < cutoff_str: continue
             valid_count += 1
             ds = f" ({date_str[:10]})" if date_str else ""
             pl = f"[{r.get('platform','')}] " if show_p and r.get("platform") else ""
             lines.append(f"■ {pl}{r.get('title','')}{ds}")
-            if r.get("url"):
-                lines.append(f"  {r['url']}")
-            if r.get("content"):
-                lines.append(f"  {r['content']}")
+            if r.get("url"): lines.append(f"  {r['url']}")
+            if r.get("content"): lines.append(f"  {r['content']}")
             lines.append("")
-
-        if valid_count == 0:
-            return f"【{label}】\n최근 3개월 내 유의미한 결과 없음\n"
+        if valid_count == 0: return f"【{label}】\n최근 3개월 내 유의미한 결과 없음\n"
         return "\n".join(lines)
 
     def fmt_quant(items, label):
-        if not items:
-            return f"【{label}】\n결과 없음\n"
+        if not items: return f"【{label}】\n결과 없음\n"
         lines = [f"【{label}】"]
         valid_count = 0
         for r in items:
             date_str = r.get("date") or ""
-            if date_str and len(date_str) >= 10 and date_str[:10] < cutoff_str:
-                continue
+            if date_str and len(date_str) >= 10 and date_str[:10] < cutoff_str: continue
             valid_count += 1
             ds = f" ({date_str[:10]})" if date_str else ""
             lines.append(f"■ {r.get('title','')}{ds}")
-            if r.get("url"):
-                lines.append(f"  {r['url']}")
-            for sent in r.get("numeric_evidence", []):
-                lines.append(f"  - {sent}")
+            if r.get("url"): lines.append(f"  {r['url']}")
+            for sent in r.get("numeric_evidence", []): lines.append(f"  - {sent}")
             lines.append("")
-        if valid_count == 0:
-            return f"【{label}】\n최근 3개월 내 유의미한 결과 없음\n"
+        if valid_count == 0: return f"【{label}】\n최근 3개월 내 유의미한 결과 없음\n"
         return "\n".join(lines)
-
 
     hdr = (
         f"=== {target} [중립 수집] ({datetime.now().strftime('%Y-%m-%d')}) ===\n"
-        f"소스: Tavily + Exa + SNS + 어닝콜 + 정량근거\n"
+        f"소스: Tavily + Exa + SNS + 어닝콜 + 정량근거 + 네이버(한국 한정)\n"
         f"주의: 아래 자료는 방향성 유도 없이 수집된 원자료이며, 강세/중립/약세 해석은 이후 에이전트가 수행한다.\n"
     )
 
-    return hdr + "\n\n".join([
+    blocks = [
         fmt(tr, "① 최근 뉴스·핵심 논점"),
         fmt(er, "② IR·리포트·공시·장문 자료"),
         fmt(sr, "③ SNS·커뮤니티 반응", show_p=True),
-        f"【④ 어닝콜·실적발표】\n{et}",
-        fmt_quant(qr, "⑤ 내러티브를 지지/반박하는 정량 근거"),
-        f"{fs}" if fs else "【⑥ FMP 구조화 정량 스냅샷】\n가용 데이터 없음\n",
+        f"【④ 어닝콜·실적발표】\n{et}"
+    ]
+    
+    if market_id == "kospi200":
+        blocks.append(fmt(nr, "⑤ 네이버 금융·뉴스 (강세/중립/약세/실적 종합)"))
+
+    idx_q = "⑥" if market_id == "kospi200" else "⑤"
+    idx_f = "⑦" if market_id == "kospi200" else "⑥"
+
+    blocks.extend([
+        fmt_quant(qr, f"{idx_q} 내러티브를 지지/반박하는 정량 근거"),
+        f"{fs}" if fs else f"【{idx_f} FMP 구조화 정량 스냅샷】\n가용 데이터 없음\n"
     ])
+
+    return hdr + "\n\n".join(blocks)
     
 # ─── LLM 호출 (로컬 Ollama 우선, 없으면 Anthropic API fallback) ──────────────
 def call_llm(system: str, user_content: str, max_tokens: int = 4000, market_id: str = "sp500") -> str:
