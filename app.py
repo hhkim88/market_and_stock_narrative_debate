@@ -665,6 +665,75 @@ def collect_quant_evidence(queries, entity_info=None, market_id="sp500"):
     return merged
 
 # ─── SEARCH FUNCTIONS ──────────────────────────────────────────────────────────
+def search_naver_news(queries):
+    import urllib.parse
+    import re
+    from datetime import datetime
+    
+    client_id = st.secrets.get("NAVER_CLIENT_ID", "")
+    client_secret = st.secrets.get("NAVER_CLIENT_SECRET", "")
+    
+    if not client_id or not client_secret:
+        return [{"title": "🚨 네이버 API 키 누락", "url": "", "content": "secrets.toml에 API 키가 없습니다.", "date": ""}]
+
+    headers = {
+        "X-Naver-Client-Id": client_id,
+        "X-Naver-Client-Secret": client_secret
+    }
+    
+    results = []
+    seen = set()
+
+    for q in queries:
+        try:
+            # ⭐️ 한글 검색어는 반드시 URL 인코딩해야 네이버 API가 정상 인식합니다.
+            encText = urllib.parse.quote(q)
+            url = f"https://openapi.naver.com/v1/search/news.json?query={encText}&display=4&sort=sim"
+            
+            r = requests.get(url, headers=headers, timeout=5)
+            
+            if r.status_code == 200:
+                data = r.json()
+                for item in data.get("items", []):
+                    link = item.get("link", "")
+                    if not link or link in seen:
+                        continue
+                    seen.add(link)
+                    
+                    # HTML 태그 및 특수문자 이스케이프 제거 (LLM 인식률 향상)
+                    title = re.sub(r'<[^>]+>', '', item.get("title", ""))
+                    title = title.replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+                    
+                    desc = re.sub(r'<[^>]+>', '', item.get("description", ""))
+                    desc = desc.replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+                    
+                    results.append({
+                        "title": title,
+                        "url": link,
+                        "content": desc,
+                        "date": item.get("pubDate", ""),
+                        "engine": "naver"
+                    })
+            else:
+                results.append({
+                    "title": f"🚨 네이버 API 에러 ({r.status_code})",
+                    "url": "",
+                    "content": f"오류 메시지: {r.text}",
+                    "date": datetime.now().strftime("%Y-%m-%d"),
+                    "engine": "naver"
+                })
+        except Exception as e:
+            results.append({
+                "title": "🚨 네이버 검색 중 예외 발생",
+                "url": "debug",
+                "content": str(e),
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "engine": "naver"
+            })
+            
+    return results
+
+
 def search_tavily(queries):
     results = []
     try:
