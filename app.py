@@ -1580,40 +1580,74 @@ def main():
     col_a, col_b = st.columns([3,1])
 
     if cached:
-        status = cached.get("status","done")
+        status = cached.get("status", "done")
+    
         if status == "running":
             at = datetime.fromisoformat(cached["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
             elapsed = int((datetime.now(timezone.utc)-at).total_seconds()/60)
             pct = float(cached.get("progress") or 0.0)
             msg = cached.get("status_msg") or "분석 준비 중..."
+    
             st.info(f"⏳ **{target_label}** 백그라운드 분석 중 ({elapsed}분 경과) — 브라우저 꺼도 계속 진행됩니다")
             st.progress(pct, text=msg)
+    
             cr, cc = st.columns([1,1])
             with cr:
-                if st.button("🔄 새로고침", use_container_width=True): st.rerun()
+                if st.button("🔄 새로고침", use_container_width=True):
+                    st.rerun()
             with cc:
                 if elapsed > 30 and st.button("⚠️ 재시작", use_container_width=True):
-                    cache_delete(target_id); st.rerun()
-            import time; time.sleep(3); st.rerun()
+                    cache_delete(target_id)
+                    st.rerun()
+    
+            import time
+            time.sleep(3)
+            st.rerun()
+    
         else:
+            # ✅ 완료된 결과가 있고, 아직 화면에 안 띄운 상태면 자동 표시
+            if (
+                cached.get("results")
+                and st.session_state.get("loaded_target_id") != target_id
+            ):
+                bp = cached.get("bull_prob") or 50
+                np_ = cached.get("neutral_prob") or 30
+                rp = cached.get("bear_prob") or 20
+    
+                st.session_state.update({
+                    "res_results": cached["results"],
+                    "res_winner": winner_from_probs(bp, np_, rp),
+                    "res_cached_at": cached["analyzed_at"],
+                    "show_results": True,
+                    "loaded_target_id": target_id,
+                })
+                st.rerun()
+    
             at = datetime.fromisoformat(cached["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
             age_h = (datetime.now(timezone.utc)-at).total_seconds()/3600
             remaining = CACHE_TTL_HOURS-age_h
+    
             with col_a:
                 if st.button(f"🗄 캐시 불러오기 ({remaining:.0f}시간 남음, 0 토큰)", type="primary", use_container_width=True):
-                    bp=cached.get("bull_prob") or 50
-                    np_=cached.get("neutral_prob") or 30
-                    rp=cached.get("bear_prob") or 20
+                    bp = cached.get("bull_prob") or 50
+                    np_ = cached.get("neutral_prob") or 30
+                    rp = cached.get("bear_prob") or 20
                     st.session_state.update({
-                        "res_results":cached["results"],
-                        "res_winner":winner_from_probs(bp,np_,rp),
-                        "res_cached_at":cached["analyzed_at"],
-                        "show_results":True,
+                        "res_results": cached["results"],
+                        "res_winner": winner_from_probs(bp, np_, rp),
+                        "res_cached_at": cached["analyzed_at"],
+                        "show_results": True,
+                        "loaded_target_id": target_id,
                     })
+                    st.rerun()
+    
             with col_b:
                 if st.button("🗑 재분석", use_container_width=True):
-                    cache_delete(target_id); st.session_state.pop("show_results",None)
-                    st.success("캐시 삭제됨."); st.rerun()
+                    cache_delete(target_id)
+                    st.session_state.pop("show_results", None)
+                    st.session_state.pop("loaded_target_id", None)
+                    st.success("캐시 삭제됨.")
+                    st.rerun()
     else:
         with col_a:
             if st.button(f"▶ {target_label} 분석 시작", type="primary", use_container_width=True):
