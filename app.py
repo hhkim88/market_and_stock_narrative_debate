@@ -630,6 +630,23 @@ def build_queries(target, direction, market_index, sector="", market_id="sp500",
         "quant": quant_queries
     }
 
+def extract_numeric_sentences(text: str, max_sentences: int = 5) -> list:
+    import re
+    if not text: 
+        return []
+        
+    # 마침표, 느낌표, 물음표를 기준으로 문장 분리
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    num_sents = []
+    
+    for s in sentences:
+        s = s.strip()
+        # 숫자가 하나라도 포함된 문장 추출
+        if re.search(r'\d+', s):
+            num_sents.append(s)
+            
+    return num_sents[:max_sentences]
+    
 def collect_quant_evidence(queries, entity_info=None, market_id="sp500"):
     tavily_items = search_tavily(queries)
     exa_items = search_exa_reports(
