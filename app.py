@@ -157,7 +157,6 @@ STOCKS = {
         ("024110","기업은행","은행"),
         ("006400","삼성SDI","배터리"),
         ("373220","LG에너지솔루션","배터리"),
-        ("035250","강원랜드","레저"),
         ("251270","넷마블","게임"),
         ("047050","포스코인터내셔널","상사/에너지"),
         ("005490","POSCO홀딩스","철강"),
@@ -165,10 +164,15 @@ STOCKS = {
         ("196170","알테오젠","바이오"),
         ("145020","휴젤","바이오"),
         ("090430","아모레퍼시픽","화장품"),
+        ("035900","JYP Ent.","엔터테인먼트"),
+        ("352820","하이브","엔터테인먼트"),
+        ("041510","에스엠","엔터테인먼트"),
+        ("053800","안랩","소프트웨어/보안"),
+        ("112040","위메이드","게임"),
+        ("263750","펄어비스","게임"),
         ("161390","한국타이어앤테크놀로지","타이어"),
         ("071050","한국금융지주","증권")
     ],
-
     "sp500": [
         ("AAPL","Apple","Technology"),
         ("MSFT","Microsoft","Technology"),
@@ -180,6 +184,7 @@ STOCKS = {
         ("BRK.B","Berkshire","Financials"),
         ("JPM","JPMorgan","Banking"),
         ("V","Visa","Payments"),
+    
         ("UNH","UnitedHealth","Healthcare"),
         ("XOM","ExxonMobil","Energy"),
         ("JNJ","J&J","Healthcare"),
@@ -190,6 +195,7 @@ STOCKS = {
         ("BAC","Bank of America","Banking"),
         ("AVGO","Broadcom","Semiconductors"),
         ("LLY","Eli Lilly","Pharma"),
+    
         ("COST","Costco","Retail"),
         ("ABBV","AbbVie","Pharma"),
         ("MRK","Merck","Pharma"),
@@ -199,11 +205,10 @@ STOCKS = {
         ("CRM","Salesforce","Software"),
         ("NFLX","Netflix","Media"),
         ("AMD","AMD","Semiconductors"),
-        ("CSCO","Cisco","Networking"),
-        ("TMO","Thermo Fisher","Life Science"),
         ("ORCL","Oracle","Software"),
+    
+        ("TMO","Thermo Fisher","Life Science"),
         ("MCD","McDonald's","Consumer"),
-        ("NKE","Nike","Apparel"),
         ("ACN","Accenture","IT Services"),
         ("LIN","Linde","Materials"),
         ("DHR","Danaher","Life Science"),
@@ -211,15 +216,23 @@ STOCKS = {
         ("QCOM","Qualcomm","Semiconductors"),
         ("INTU","Intuit","Software"),
         ("AMGN","Amgen","Biotech"),
-        ("INTC","Intel","Semiconductors"),
         ("GE","GE Aerospace","Aerospace"),
+        ("CSCO","Cisco","Networking"),
+        ("NKE","Nike","Apparel"),
+        ("PM","Philip Morris","Consumer"),
+        ("IBM","IBM","Technology"),
+        ("INTC","Intel","Semiconductors")
         ("CAT","Caterpillar","Industrials"),
         ("NOW","ServiceNow","Software"),
-        ("IBM","IBM","Technology"),
-        ("PM","Philip Morris","Consumer"),
         ("GS","Goldman Sachs","Financials"),
         ("PLTR","Palantir","Software"),
-        ("UBER","Uber","Platform")
+        ("UBER","Uber","Platform"),
+    
+        ("AMAT","Applied Materials","Semiconductor Equipment"),
+        ("ETN","Eaton","Power Infrastructure"),
+        ("RTX","RTX","Defense/Aerospace"),
+        ("BKNG","Booking Holdings","Travel Platform"),
+        ("SPGI","S&P Global","Financial Data"),
     ],
 
     "nikkei225": [
