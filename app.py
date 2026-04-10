@@ -221,7 +221,7 @@ STOCKS = {
         ("NKE","Nike","Apparel"),
         ("PM","Philip Morris","Consumer"),
         ("IBM","IBM","Technology"),
-        ("INTC","Intel","Semiconductors")
+        ("INTC","Intel","Semiconductors"),
         ("CAT","Caterpillar","Industrials"),
         ("NOW","ServiceNow","Software"),
         ("GS","Goldman Sachs","Financials"),
