@@ -1544,7 +1544,7 @@ def main():
         gm = get_ollama_model('nikkei225')
         st.markdown(f"""<h1 style='background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);
         -webkit-background-clip:text;-webkit-text-fill-color:transparent;font-size:26px;margin:0'>
-        ⚡ 시장 및 종목 내러티브 수집 및 분석 엔진</h1>
+        ⚡ [시장/종목] 내러티브 앤 넘버스 수집 및 분석</h1>
         <p style='color:#4a5568;font-size:11px;letter-spacing:2px;margin:2px 0 0'>
         7-AGENT AI · 향후 3개월 판정 · 🇰🇷{qw} / 🇺🇸{ll} / 🇯🇵{gm}</p>""", unsafe_allow_html=True)
     with col_info:
