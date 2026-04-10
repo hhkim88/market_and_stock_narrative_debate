@@ -383,7 +383,6 @@ def normalize_entity(target: str, ticker_raw: str = "", market_id: str = "sp500"
     }
     
 # ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
-# ─── QUERY BUILDER ─────────────────────────────────────────────────────────────
 def build_queries(target, direction, market_index, sector="", market_id="sp500", ticker_raw=""):
     entity = normalize_entity(target, ticker_raw, market_id)
     canonical = entity["canonical"]
@@ -405,6 +404,12 @@ def build_queries(target, direction, market_index, sector="", market_id="sp500",
             f'{alias_main}{sector_txt} competition demand margin capex',
             f'{alias_main} regulatory risk execution narrative'
         ]
+        quant_queries = [
+            f'{alias_or} 매출 영업이익 영업이익률 순이익 EPS 전망',
+            f'{alias_or} 가이던스 CAPEX 수주 backlog 신규수주',
+            f'{alias_or} 공시 실적 발표 수치 YoY QoQ',
+            f'{alias_or} 사업보고서 분기보고서 주석 수치'
+        ]
     elif market_id == "nikkei225":
         tavily_queries = [
             f'{alias_or} 最新ニュース 事業戦略 競争 リスク',
@@ -417,6 +422,12 @@ def build_queries(target, direction, market_index, sector="", market_id="sp500",
             f'{alias_main} earnings release investor relations profitability',
             f'{alias_main}{sector_txt} competition demand margin capex',
             f'{alias_main} regulatory risk execution narrative'
+        ]
+        quant_queries = [
+            f'{alias_or} 売上 営業利益 EPS ガイダンス',
+            f'{alias_or} CAPEX 受注 backlog 需要',
+            f'{alias_or} 決算短信 数値 YoY QoQ',
+            f'{alias_or} 有価証券報告書 注記 数値'
         ]
     else:
         tavily_queries = [
@@ -431,6 +442,12 @@ def build_queries(target, direction, market_index, sector="", market_id="sp500",
             f'{alias_main}{sector_txt} competition demand margin capex',
             f'{alias_main} regulatory risk execution narrative'
         ]
+        quant_queries = [
+            f'{alias_or} revenue operating margin EPS guidance YoY QoQ',
+            f'{alias_or} capex bookings backlog order demand numbers',
+            f'{alias_or} annual report 10-Q 10-K financial metrics',
+            f'{alias_or} notes to financial statements quantitative disclosure'
+        ]
 
     sns_queries = _build_sns_queries(alias_main, "neutral", market_id)
 
@@ -438,8 +455,119 @@ def build_queries(target, direction, market_index, sector="", market_id="sp500",
         "entity": entity,
         "tavily": tavily_queries,
         "exa_report": exa_queries,
-        "exa_sns": sns_queries
+        "exa_sns": sns_queries,
+        "quant": quant_queries
     }
+
+def build_queries(target, direction, market_index, sector="", market_id="sp500", ticker_raw=""):
+    entity = normalize_entity(target, ticker_raw, market_id)
+    canonical = entity["canonical"]
+    aliases = entity["aliases"][:4]
+    alias_main = canonical
+    alias_or = " OR ".join([f'"{a}"' for a in aliases])
+    sector_txt = f" {sector}" if sector else ""
+
+    if market_id == "kospi200":
+        tavily_queries = [
+            f'{alias_or} 최근 뉴스 사업 전략 경쟁 리스크',
+            f'{alias_or}{sector_txt} 실적 발표 수익성 수요 마진',
+            f'{alias_or} 투자 포인트 우려 요인',
+            f'{market_index} 최근 전망 거시 수급 금리 환율'
+        ]
+        exa_queries = [
+            f'{alias_main} investment thesis strategy risk catalyst',
+            f'{alias_main} earnings release investor relations profitability',
+            f'{alias_main}{sector_txt} competition demand margin capex',
+            f'{alias_main} regulatory risk execution narrative'
+        ]
+        quant_queries = [
+            f'{alias_or} 매출 영업이익 영업이익률 순이익 EPS 전망',
+            f'{alias_or} 가이던스 CAPEX 수주 backlog 신규수주',
+            f'{alias_or} 공시 실적 발표 수치 YoY QoQ',
+            f'{alias_or} 사업보고서 분기보고서 주석 수치'
+        ]
+    elif market_id == "nikkei225":
+        tavily_queries = [
+            f'{alias_or} 最新ニュース 事業戦略 競争 リスク',
+            f'{alias_or}{sector_txt} 決算 収益性 需要 マージン',
+            f'{alias_or} 投資ポイント 懸念材料',
+            f'{market_index} 見通し 金利 為替 マクロ'
+        ]
+        exa_queries = [
+            f'{alias_main} investment thesis strategy risk catalyst',
+            f'{alias_main} earnings release investor relations profitability',
+            f'{alias_main}{sector_txt} competition demand margin capex',
+            f'{alias_main} regulatory risk execution narrative'
+        ]
+        quant_queries = [
+            f'{alias_or} 売上 営業利益 EPS ガイダンス',
+            f'{alias_or} CAPEX 受注 backlog 需要',
+            f'{alias_or} 決算短信 数値 YoY QoQ',
+            f'{alias_or} 有価証券報告書 注記 数値'
+        ]
+    else:
+        tavily_queries = [
+            f'{alias_or} latest news strategy competition risk',
+            f'{alias_or}{sector_txt} earnings profitability demand margins',
+            f'{alias_or} key debate catalysts concerns',
+            f'{market_index} latest outlook macro rates positioning'
+        ]
+        exa_queries = [
+            f'{alias_main} investment thesis strategy risk catalyst',
+            f'{alias_main} earnings release investor relations profitability',
+            f'{alias_main}{sector_txt} competition demand margin capex',
+            f'{alias_main} regulatory risk execution narrative'
+        ]
+        quant_queries = [
+            f'{alias_or} revenue operating margin EPS guidance YoY QoQ',
+            f'{alias_or} capex bookings backlog order demand numbers',
+            f'{alias_or} annual report 10-Q 10-K financial metrics',
+            f'{alias_or} notes to financial statements quantitative disclosure'
+        ]
+
+    sns_queries = _build_sns_queries(alias_main, "neutral", market_id)
+
+    return {
+        "entity": entity,
+        "tavily": tavily_queries,
+        "exa_report": exa_queries,
+        "exa_sns": sns_queries,
+        "quant": quant_queries
+    }
+
+def collect_quant_evidence(queries, entity_info=None, market_id="sp500"):
+    tavily_items = search_tavily(queries)
+    exa_items = search_exa_reports(
+        queries,
+        entity_info=entity_info,
+        recent_days=120,
+        market_id=market_id
+    )
+
+    merged = []
+    seen = set()
+
+    for r in tavily_items + exa_items:
+        url = r.get("url", "") or ""
+        title = r.get("title", "") or ""
+        key = (url, title)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        num_sents = extract_numeric_sentences(r.get("content", "") or "", max_sentences=5)
+        if not num_sents:
+            continue
+
+        merged.append({
+            "title": title,
+            "url": url,
+            "date": r.get("date", "") or "",
+            "numeric_evidence": num_sents,
+            "engine": r.get("engine", "mixed")
+        })
+
+    return merged
 
 # ─── SEARCH FUNCTIONS ──────────────────────────────────────────────────────────
 def search_tavily(queries):
@@ -702,6 +830,79 @@ def _fetch_fmp(ticker, fmp_key, yr, yr_p):
     if len(text)>6000: text=text[:3500]+"\n[중략]\n"+text[-2000:]
     return f"【어닝콜: {ticker} Q{q} {y}】\n(Financial Modeling Prep)\n\n{text}"
 
+def fetch_fmp_financial_snapshot(ticker_raw: str, market_id: str = "sp500") -> str:
+    """
+    미국 종목에 한해 FMP에서 최근 재무/추정/가이던스 관련 숫자 스냅샷을 가져옴.
+    실패하면 None 반환.
+    """
+    if not ticker_raw or market_id != "sp500":
+        return None
+
+    fmp_key = st.secrets.get("FMP_API_KEY", "")
+    if not fmp_key or fmp_key.strip() in ("", "...", "여기에_FMP_키"):
+        return None
+
+    ticker = FMP_TICKER_MAP.get(ticker_raw, ticker_raw).replace(".", "-")
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    endpoints = {
+        "income_statement": f"https://financialmodelingprep.com/api/v3/income-statement/{ticker}?limit=2&apikey={fmp_key}",
+        "ratios": f"https://financialmodelingprep.com/api/v3/ratios/{ticker}?limit=2&apikey={fmp_key}",
+        "analyst_estimates": f"https://financialmodelingprep.com/api/v3/analyst-estimates/{ticker}?limit=2&apikey={fmp_key}",
+    }
+
+    out = []
+
+    for label, url in endpoints.items():
+        try:
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code != 200:
+                continue
+
+            data = r.json()
+            if not data or not isinstance(data, list):
+                continue
+
+            row = data[0]
+
+            if label == "income_statement":
+                out.append(
+                    f"■ 최근 손익계산서: "
+                    f"매출={row.get('revenue')}, "
+                    f"영업이익={row.get('operatingIncome')}, "
+                    f"순이익={row.get('netIncome')}, "
+                    f"EPS={row.get('eps')}, "
+                    f"발표일={row.get('date')}"
+                )
+
+            elif label == "ratios":
+                out.append(
+                    f"■ 최근 주요 비율: "
+                    f"grossMargin={row.get('grossProfitMargin')}, "
+                    f"operatingMargin={row.get('operatingProfitMargin')}, "
+                    f"netMargin={row.get('netProfitMargin')}, "
+                    f"ROE={row.get('returnOnEquity')}, "
+                    f"date={row.get('date')}"
+                )
+
+            elif label == "analyst_estimates":
+                out.append(
+                    f"■ 최근 추정치: "
+                    f"estimatedRevenueAvg={row.get('estimatedRevenueAvg')}, "
+                    f"estimatedEbitdaAvg={row.get('estimatedEbitdaAvg')}, "
+                    f"estimatedEpsAvg={row.get('estimatedEpsAvg')}, "
+                    f"date={row.get('date')}"
+                )
+
+        except Exception:
+            continue
+
+    if not out:
+        return None
+
+    return "【FMP 구조화 정량 스냅샷】\n" + "\n".join(out)
+        
+    
 def combined_search(target, direction, market_index, sector="", ticker_raw="", market_id="sp500"):
     qs = build_queries(target, direction, market_index, sector, market_id, ticker_raw=ticker_raw)
 
@@ -713,7 +914,13 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
         market_id=market_id
     )
     sr = search_tavily_sns(qs["exa_sns"], market_id=market_id)
+    qr = collect_quant_evidence(
+        qs["quant"],
+        entity_info=qs.get("entity"),
+        market_id=market_id
+    )
     et = fetch_earnings_transcript(ticker_raw, target_name=target, market_id=market_id) if ticker_raw else "[지수 — 어닝콜 해당 없음]"
+    fs = fetch_fmp_financial_snapshot(ticker_raw, market_id=market_id) if ticker_raw else None
 
     cutoff_str = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
 
@@ -742,11 +949,32 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
             return f"【{label}】\n최근 3개월 내 유의미한 결과 없음\n"
         return "\n".join(lines)
 
+    def fmt_quant(items, label):
+        if not items:
+            return f"【{label}】\n결과 없음\n"
+        lines = [f"【{label}】"]
+        valid_count = 0
+        for r in items:
+            date_str = r.get("date") or ""
+            if date_str and len(date_str) >= 10 and date_str[:10] < cutoff_str:
+                continue
+            valid_count += 1
+            ds = f" ({date_str[:10]})" if date_str else ""
+            lines.append(f"■ {r.get('title','')}{ds}")
+            if r.get("url"):
+                lines.append(f"  {r['url']}")
+            for sent in r.get("numeric_evidence", []):
+                lines.append(f"  - {sent}")
+            lines.append("")
+        if valid_count == 0:
+            return f"【{label}】\n최근 3개월 내 유의미한 결과 없음\n"
+        return "\n".join(lines)
+
+
     hdr = (
         f"=== {target} [중립 수집] ({datetime.now().strftime('%Y-%m-%d')}) ===\n"
-        f"소스: Tavily + Exa + SNS + 어닝콜\n"
-        f"주의: 아래 자료는 방향성 유도 없이 수집된 원자료이며, "
-        f"강세/중립/약세 해석은 이후 에이전트가 수행한다.\n"
+        f"소스: Tavily + Exa + SNS + 어닝콜 + 정량근거\n"
+        f"주의: 아래 자료는 방향성 유도 없이 수집된 원자료이며, 강세/중립/약세 해석은 이후 에이전트가 수행한다.\n"
     )
 
     return hdr + "\n\n".join([
@@ -754,6 +982,8 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
         fmt(er, "② IR·리포트·공시·장문 자료"),
         fmt(sr, "③ SNS·커뮤니티 반응", show_p=True),
         f"【④ 어닝콜·실적발표】\n{et}",
+        fmt_quant(qr, "⑤ 내러티브를 지지/반박하는 정량 근거"),
+        f"{fs}" if fs else "【⑥ FMP 구조화 정량 스냅샷】\n가용 데이터 없음\n",
     ])
     
 # ─── LLM 호출 (로컬 Ollama 우선, 없으면 Anthropic API fallback) ──────────────
@@ -936,43 +1166,55 @@ def build_system_prompts(market, stock=None):
 ## 📈 {target} 강세 내러티브 수집 (향후 3개월)
 ### 강세 내러티브의 핵심 주장
 ### 그 주장을 떠받치는 인과 구조 [왜 이 기업/지수가 좋아질 것인가]
-### 핵심 근거 [수치보다 논리와 메커니즘 중심]
+### 핵심 근거 [논리와 메커니즘 중심]
+### 정량 근거 점검
+[재무제표 수치, 주석 수치, 가이던스 수치, 수주/계약/백로그 수치 중 강세 내러티브를 지지하는 숫자를 제시하시오.
+반드시 구체 숫자를 포함하고, 숫자가 부족하면 “정량 근거 부족”이라고 명시하시오.]
 ### 반대 증거에 대한 강세 측의 반론
 ### SNS·커뮤니티에서 확인되는 정서
 ### 어닝콜 핵심 포인트 [강세 해석 가능 구절]
 ### 강세 내러티브의 전제 조건
 ### 강세 내러티브 강도 평가 [1-10점]
+### 내러티브-정량 일치도 평가 [1-10점]
 ### 강세 내러티브 3줄 요약
-중요: 목표가·투자의견 자체를 평가의 중심에 두지 말고, 내러티브의 설득력과 구조적 완결성을 중심으로 평가하시오.
+중요: 목표가·투자의견 자체를 평가의 중심에 두지 말고, 내러티브의 설득력과 그것을 뒷받침하는 숫자의 일치 여부를 함께 평가하시오.
 출처(기관명, 날짜, URL)를 반드시 명시하시오.{base_warn}""",
 
 "neutral": f"""{lang_instruction}
 ## ➡️ {target} 중립 내러티브 수집 (향후 3개월)
 ### 중립 내러티브의 핵심 주장
 ### 그 주장을 떠받치는 인과 구조
-### 핵심 근거 [수치보다 논리와 메커니즘 중심]
+### 핵심 근거 [논리와 메커니즘 중심]
+### 정량 근거 점검
+[재무제표 수치, 주석 수치, 가이던스 수치, 수주/계약/백로그 수치 중 강세 내러티브를 지지하는 숫자를 제시하시오.
+반드시 구체 숫자를 포함하고, 숫자가 부족하면 “정량 근거 부족”이라고 명시하시오.]
 ### 강세·약세 양측이 모두 놓치고 있는 점
 ### SNS·커뮤니티에서 확인되는 정서
 ### 어닝콜 핵심 포인트 [불확실성·균형 신호]
 ### 중립 내러티브의 전제 조건
 ### 중립 내러티브 강도 평가 [1-10점]
+### 내러티브-정량 일치도 평가 [1-10점]
 ### 중립 내러티브 3줄 요약
-중요: 목표가·투자의견 자체를 평가의 중심에 두지 말고, 내러티브의 설득력과 구조적 완결성을 중심으로 평가하시오.
-출처를 반드시 명시하시오.{base_warn}""",
+중요: 목표가·투자의견 자체를 평가의 중심에 두지 말고, 내러티브의 설득력과 그것을 뒷받침하는 숫자의 일치 여부를 함께 평가하시오.
+출처(기관명, 날짜, URL)를 반드시 명시하시오.{base_warn}""",
 
 "bear": f"""{lang_instruction}
 ## 📉 {target} 약세 내러티브 수집 (향후 3개월)
 ### 약세 내러티브의 핵심 주장
 ### 그 주장을 떠받치는 인과 구조 [왜 악화될 것인가]
-### 핵심 근거 [수치보다 논리와 메커니즘 중심]
+### 핵심 근거 [논리와 메커니즘 중심]
+### 정량 근거 점검
+[재무제표 수치, 주석 수치, 가이던스 수치, 수주/계약/백로그 수치 중 강세 내러티브를 지지하는 숫자를 제시하시오.
+반드시 구체 숫자를 포함하고, 숫자가 부족하면 “정량 근거 부족”이라고 명시하시오.]
 ### 반대 증거에 대한 약세 측의 반론
 ### SNS·커뮤니티에서 확인되는 정서
 ### 어닝콜 핵심 포인트 [리스크·악화 시그널]
 ### 약세 내러티브의 전제 조건
 ### 약세 내러티브 강도 평가 [1-10점]
+### 내러티브-정량 일치도 평가 [1-10점]
 ### 약세 내러티브 3줄 요약
-중요: 목표가·투자의견 자체를 평가의 중심에 두지 말고, 내러티브의 설득력과 구조적 완결성을 중심으로 평가하시오.
-출처를 반드시 명시하시오.{base_warn}""",
+중요: 목표가·투자의견 자체를 평가의 중심에 두지 말고, 내러티브의 설득력과 그것을 뒷받침하는 숫자의 일치 여부를 함께 평가하시오.
+출처(기관명, 날짜, URL)를 반드시 명시하시오.{base_warn}""",
 
 "bull_critic": f"""{lang_instruction}
 You are an adversarial analyst stress-testing bullish narratives.
@@ -981,11 +1223,12 @@ Do not include English source text.
 Do not add '번역' or 'Translation' sections.
 ## 🔥 강세 내러티브 비판
 ### 서사의 약한 고리 [인과 연결의 약함]
+### 정량 근거의 취약점
 ### 강세가 무시한 반대 증거
 ### 강세 논리의 비약 또는 과장
 ### 향후 3개월 내 강세 서사가 무너질 조건
 ### 강세 내러티브 신뢰도 [1-10점 및 2줄 평가]
-중요: 목표가나 투자의견 수준이 아니라 내러티브의 설득력 자체를 비판하시오.""",
+중요: 목표가나 투자의견 수준이 아니라 내러티브의 설득력과 숫자 근거의 정합성을 함께 비판하시오.""",
 
         "neutral_critic": f"""{lang_instruction}
 You are an adversarial analyst stress-testing neutral narratives.
@@ -994,11 +1237,12 @@ Do not include English source text.
 Do not add '번역' or 'Translation' sections.
 ## 🔥 중립 내러티브 비판
 ### 서사의 약한 고리 [인과 연결의 약함]
+### 정량 근거의 취약점
 ### 중립이 무시한 반대 증거
 ### 중립 논리의 비약 또는 과장
 ### 향후 3개월 내 중립 서사가 무너질 조건
 ### 중립 내러티브 신뢰도 [1-10점 및 2줄 평가]
-중요: 목표가나 투자의견 수준이 아니라 내러티브의 설득력 자체를 비판하시오.""",
+중요: 목표가나 투자의견 수준이 아니라 내러티브의 설득력과 숫자 근거의 정합성을 함께 비판하시오.""",
 
         "bear_critic": f"""{lang_instruction}
 You are an adversarial analyst stress-testing bearish narratives.
@@ -1007,17 +1251,22 @@ Do not include English source text.
 Do not add '번역' or 'Translation' sections.
 ## 🔥 약세 내러티브 비판
 ### 서사의 약한 고리 [인과 연결의 약함]
+### 정량 근거의 취약점
 ### 약세가 무시한 반대 증거
 ### 약세 논리의 비약 또는 과장
 ### 향후 3개월 내 약세 서사가 무너질 조건
 ### 약세 내러티브 신뢰도 [1-10점 및 2줄 평가]
-중요: 목표가나 투자의견 수준이 아니라 내러티브의 설득력 자체를 비판하시오.""",
+중요: 목표가나 투자의견 수준이 아니라 내러티브의 설득력과 숫자 근거의 정합성을 함께 비판하시오.""",
 
 "judge": f"""{lang_instruction}
 You are the Chief Investment Strategist reviewing a 6-agent debate.
 Output only one final Korean version.
 Do not include English source text.
 Do not add '번역' or 'Translation' sections.
+
+- 내러티브가 설득력 있어도 정량 근거가 빈약하면 신뢰도를 낮출 것
+- 정량 지표가 좋아도 그것이 서사와 연결되지 않으면 높은 점수를 주지 말 것
+- 가장 높은 평가는 서사와 숫자가 동일한 방향으로 정합적으로 결합될 때만 부여할 것
 
 ⚠️ 절대 금지:
 - 목표가 자체를 근거의 중심으로 삼지 말 것
@@ -1037,8 +1286,18 @@ Do not add '번역' or 'Translation' sections.
 - 중립 내러티브 강도: [1-10]
 - 약세 내러티브 강도: [1-10]
 
+### 정량 뒷받침 강도 평가
+- 강세 내러티브의 정량 뒷받침 강도: [1-10]
+- 중립 내러티브의 정량 뒷받침 강도: [1-10]
+- 약세 내러티브의 정량 뒷받침 강도: [1-10]
+
+### 숫자가 실제로 지지하는 방향
+[재무제표 수치, 가이던스, 수주/백로그, 마진, EPS, CAPEX 등 수치가
+실제로 어느 내러티브를 가장 강하게 지지하는지 간결히 판단]
+
 ### 선택 이유
-[왜 가장 설득력 있는지. 목표가가 아니라 서사의 구조적 완결성, 인과 논리, 반증 대응력을 중심으로 서술]
+[왜 가장 설득력 있는지. 서사의 구조적 완결성, 인과 논리, 반증 대응력뿐 아니라
+그 서사가 실제 정량 지표로 얼마나 뒷받침되는지를 함께 서술]
 
 ### 현재 가격 기준 상황
 [보조 정보로 짧게 요약]
