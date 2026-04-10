@@ -1554,7 +1554,7 @@ def display_leaderboard():
         for h,t in zip([h1,h2,h3,h4,h5,h6], ["순위","시장","종목/지수","판정","확률 분포","분석"]):
             h.markdown(f"<span style='color:#4a5568;font-size:11px'>{t}</span>", unsafe_allow_html=True)
 
-        st.markdown("<hr style='margin:4px 0;border-color:#e2eef'>", unsafe_allow_html=True)
+        st.markdown("<hr style='margin:4px 0;border-color:#e2e6ef'>", unsafe_allow_html=True)
 
         for rank, row in enumerate(rows, 1):
             bp = row.get("bull_prob") or 0
@@ -1626,34 +1626,30 @@ def main():
     stocks = STOCKS[market["id"]]
     
     with st.expander("분석 대상 선택 / 접기", expanded=True):
-        stock_query = st.text_input(
-            "종목 검색",
-            value="",
-            placeholder="기업명 / 티커 / 섹터로 검색"
-        ).strip().lower()
-    
-        filtered_stocks = []
-        for t, n, s in stocks:
-            hay = f"{t} {n} {s}".lower()
-            if not stock_query or stock_query in hay:
-                filtered_stocks.append((t, n, s))
-    
-        options = ["📊 지수 전체"] + [f"{n} · {t} ({s})" for t, n, s in filtered_stocks]
-    
+        options = ["📊 지수 전체"] + [f"{n} · {t} ({s})" for t, n, s in stocks]
         choice = st.selectbox(
-            f"선택 가능한 대상: {len(filtered_stocks)}개 종목 + 지수 전체",
+            f"선택 가능한 대상: {len(stocks)}개 종목 + 지수 전체",
             options,
             label_visibility="collapsed"
         )
-
+    
     if choice == "📊 지수 전체":
         stock, target_id = None, market["id"]
         target_label = f"{market['flag']} {market['index']}"
     else:
         idx = options.index(choice) - 1
-        stock = filtered_stocks[idx]
+        stock = stocks[idx]
         target_id = f"{market['id']}_{stock[0]}"
         target_label = f"{stock[1]} ({stock[0]})"
+    
+        if choice == "📊 지수 전체":
+            stock, target_id = None, market["id"]
+            target_label = f"{market['flag']} {market['index']}"
+        else:
+            idx = options.index(choice) - 1
+            stock = filtered_stocks[idx]
+            target_id = f"{market['id']}_{stock[0]}"
+            target_label = f"{stock[1]} ({stock[0]})"
 
     st.markdown(f"**선택:** {target_label}")
     cached = cache_get(target_id)
