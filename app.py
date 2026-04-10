@@ -1652,6 +1652,7 @@ def main():
         with col_a:
             if st.button(f"▶ {target_label} 분석 시작", type="primary", use_container_width=True):
                 st.session_state.pop("show_results",None)
+                st.session_state.pop("loaded_target_id", None)
                 prompts = build_system_prompts(market, stock)
                 cache_set_running(target_id, market["id"], target_label)
 
