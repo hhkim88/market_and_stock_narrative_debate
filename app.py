@@ -1530,55 +1530,70 @@ def display_results(results, winner, cached_at=None):
         st.markdown(results.get("judge","결과 없음"))
 
 def display_leaderboard():
-    rows  = load_leaderboard()
-    total = 3 + 20*3
-    done  = len([r for r in rows if r.get("status","done")!="running"])
-    running = len([r for r in rows if r.get("status")=="running"])
-    pct = int(done/total*100)
+    rows = load_leaderboard()
 
-    st.markdown("### 📊 추천 강도 랭킹 (48시간 내 · 강세 확률 높은 순)")
-    label = f"{done}/{total} 완료 ({pct}%)"
-    if running: label += f" · 🔄 {running}개 분석 진행 중"
-    st.progress(pct/100, text=label)
-    if not rows: st.caption("아직 분석 없음."); return
+    done_rows = [r for r in rows if r.get("status") != "running"]
+    running_rows = [r for r in rows if r.get("status") == "running"]
 
-    mf={"kospi200":"🇰🇷","sp500":"🇺🇸","nikkei225":"🇯🇵"}
-    h1,h2,h3,h4,h5,h6=st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
-    for h,t in zip([h1,h2,h3,h4,h5,h6],["순위","시장","종목/지수","판정","확률 분포","분석"]):
-        h.markdown(f"<span style='color:#4a5568;font-size:11px'>{t}</span>",unsafe_allow_html=True)
-    st.markdown("<hr style='margin:4px 0;border-color:#e2e6ef'>",unsafe_allow_html=True)
+    st.markdown("### 📊 분석 현황")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("완료된 분석", f"{len(done_rows)}개")
+    c2.metric("진행 중", f"{len(running_rows)}개")
+    c3.metric("전체 캐시", f"{len(rows)}개")
 
-    for rank,row in enumerate(rows,1):
-        bp=row.get("bull_prob") or 0
-        np_=row.get("neutral_prob") or 0
-        rp=row.get("bear_prob") or 0
-        w=row.get("winner","")
-        flag=mf.get(row.get("market_id",""),"")
-        is_running = row.get("status")=="running"
-        rank_color="#00e87a" if bp>=55 else "#f5c518" if bp>=45 else "#ff3c4e"
+    if not rows:
+        st.caption("아직 분석 없음.")
+        return
 
-        c1,c2,c3,c4,c5,c6=st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
-        c1.markdown(f"<div style='color:{rank_color};font-weight:900;font-size:14px;padding-top:4px'>#{rank}</div>",unsafe_allow_html=True)
-        c2.markdown(f"<div style='font-size:18px;padding-top:2px'>{flag}</div>",unsafe_allow_html=True)
-        c3.markdown(f"<div style='color:#4a5568;font-size:13px;padding-top:4px'>{row['target_label']}</div>",unsafe_allow_html=True)
-        if is_running:
-            c4.markdown("🔄 분석중")
-        else:
-            c4.markdown(winner_badge(w))
+    with st.expander("랭킹 보기 / 접기", expanded=False):
+        st.markdown("#### 추천 강도 랭킹 (48시간 내 · 강세 확률 높은 순)")
 
-        if is_running:
-            c5.markdown("<div style='color:#6b7a9e;font-size:11px;padding-top:6px'>진행 중...</div>",unsafe_allow_html=True)
-        else:
-            bar=f"""<div style='display:flex;gap:2px;align-items:center;margin-top:6px'>
-            <div style='width:{bp}%;height:8px;background:#00e87a;border-radius:2px 0 0 2px'></div>
-            <div style='width:{np_}%;height:8px;background:#f5c518'></div>
-            <div style='width:{rp}%;height:8px;background:#ff3c4e;border-radius:0 2px 2px 0'></div>
-            </div><div style='display:flex;gap:8px;font-size:9px;color:#6b7a9e;margin-top:2px'>
-            <span style='color:#00e87a'>↑{bp}%</span><span style='color:#f5c518'>→{np_}%</span><span style='color:#ff3c4e'>↓{rp}%</span>
-            </div>"""
-            c5.markdown(bar,unsafe_allow_html=True)
-        c6.markdown(f"<div style='color:#374151;font-size:10px;padding-top:6px'>{'진행중' if is_running else age_label(row['age_hours'])}</div>",unsafe_allow_html=True)
-        st.markdown("<hr style='margin:2px 0;border-color:#f0f0f0'>",unsafe_allow_html=True)
+        mf = {"kospi200":"🇰🇷","sp500":"🇺🇸","nikkei225":"🇯🇵"}
+        h1,h2,h3,h4,h5,h6 = st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
+
+        for h,t in zip([h1,h2,h3,h4,h5,h6], ["순위","시장","종목/지수","판정","확률 분포","분석"]):
+            h.markdown(f"<span style='color:#4a5568;font-size:11px'>{t}</span>", unsafe_allow_html=True)
+
+        st.markdown("<hr style='margin:4px 0;border-color:#e2eef'>", unsafe_allow_html=True)
+
+        for rank, row in enumerate(rows, 1):
+            bp = row.get("bull_prob") or 0
+            np_ = row.get("neutral_prob") or 0
+            rp = row.get("bear_prob") or 0
+            w = row.get("winner", "")
+            flag = mf.get(row.get("market_id", ""), "")
+            is_running = row.get("status") == "running"
+            rank_color = "#00e87a" if bp >= 55 else "#f5c518" if bp >= 45 else "#ff3c4e"
+
+            c1,c2,c3,c4,c5,c6 = st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
+            c1.markdown(f"<div style='color:{rank_color};font-weight:900;font-size:14px;padding-top:4px'>#{rank}</div>", unsafe_allow_html=True)
+            c2.markdown(f"<div style='font-size:18px;padding-top:2px'>{flag}</div>", unsafe_allow_html=True)
+            c3.markdown(f"<div style='color:#4a5568;font-size:13px;padding-top:4px'>{row['target_label']}</div>", unsafe_allow_html=True)
+
+            if is_running:
+                c4.markdown("🔄 분석중")
+                c5.markdown("<div style='color:#6b7a9e;font-size:11px;padding-top:6px'>진행 중...</div>", unsafe_allow_html=True)
+            else:
+                c4.markdown(winner_badge(w))
+                bar = f"""
+                <div style='display:flex;gap:2px;align-items:center;margin-top:6px'>
+                    <div style='width:{bp}%;height:8px;background:#00e87a;border-radius:2px 0 0 2px'></div>
+                    <div style='width:{np_}%;height:8px;background:#f5c518'></div>
+                    <div style='width:{rp}%;height:8px;background:#ff3c4e;border-radius:0 2px 2px 0'></div>
+                </div>
+                <div style='display:flex;gap:8px;font-size:9px;color:#6b7a9e;margin-top:2px'>
+                    <span style='color:#00e87a'>↑{bp}%</span>
+                    <span style='color:#f5c518'>→{np_}%</span>
+                    <span style='color:#ff3c4e'>↓{rp}%</span>
+                </div>
+                """
+                c5.markdown(bar, unsafe_allow_html=True)
+
+            c6.markdown(
+                f"<div style='color:#374151;font-size:10px;padding-top:6px'>{'진행중' if is_running else age_label(row['age_hours'])}</div>",
+                unsafe_allow_html=True
+            )
+            st.markdown("<hr style='margin:2px 0;border-color:#f0f0f0'>", unsafe_allow_html=True)
 
 # ─── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
@@ -1609,15 +1624,34 @@ def main():
 
     st.markdown("### STEP 2 · 분석 대상")
     stocks = STOCKS[market["id"]]
-    options = ["📊 지수 전체"] + [f"{n} · {t} ({s})" for t,n,s in stocks]
-    choice = st.selectbox("",options,label_visibility="collapsed")
+    
+    with st.expander("분석 대상 선택 / 접기", expanded=True):
+        stock_query = st.text_input(
+            "종목 검색",
+            value="",
+            placeholder="기업명 / 티커 / 섹터로 검색"
+        ).strip().lower()
+    
+        filtered_stocks = []
+        for t, n, s in stocks:
+            hay = f"{t} {n} {s}".lower()
+            if not stock_query or stock_query in hay:
+                filtered_stocks.append((t, n, s))
+    
+        options = ["📊 지수 전체"] + [f"{n} · {t} ({s})" for t, n, s in filtered_stocks]
+    
+        choice = st.selectbox(
+            f"선택 가능한 대상: {len(filtered_stocks)}개 종목 + 지수 전체",
+            options,
+            label_visibility="collapsed"
+        )
 
     if choice == "📊 지수 전체":
         stock, target_id = None, market["id"]
         target_label = f"{market['flag']} {market['index']}"
     else:
-        idx = options.index(choice)-1
-        stock = stocks[idx]
+        idx = options.index(choice) - 1
+        stock = filtered_stocks[idx]
         target_id = f"{market['id']}_{stock[0]}"
         target_label = f"{stock[1]} ({stock[0]})"
 
