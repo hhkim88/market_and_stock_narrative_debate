@@ -1624,14 +1624,12 @@ def main():
 
     st.markdown("### STEP 2 · 분석 대상")
     stocks = STOCKS[market["id"]]
-    
-    with st.expander("분석 대상 선택 / 접기", expanded=True):
-        options = ["📊 지수 전체"] + [f"{n} · {t} ({s})" for t, n, s in stocks]
-        choice = st.selectbox(
-            f"선택 가능한 대상: {len(stocks)}개 종목 + 지수 전체",
-            options,
-            label_visibility="collapsed"
-        )
+    options = ["📊 지수 전체"] + [f"{n} · {t} ({s})" for t, n, s in stocks]
+    choice = st.selectbox(
+        f"선택 가능한 대상: {len(stocks)}개 종목 + 지수 전체",
+        options,
+        label_visibility="collapsed"
+    )
     
     if choice == "📊 지수 전체":
         stock, target_id = None, market["id"]
@@ -1641,15 +1639,6 @@ def main():
         stock = stocks[idx]
         target_id = f"{market['id']}_{stock[0]}"
         target_label = f"{stock[1]} ({stock[0]})"
-    
-        if choice == "📊 지수 전체":
-            stock, target_id = None, market["id"]
-            target_label = f"{market['flag']} {market['index']}"
-        else:
-            idx = options.index(choice) - 1
-            stock = filtered_stocks[idx]
-            target_id = f"{market['id']}_{stock[0]}"
-            target_label = f"{stock[1]} ({stock[0]})"
 
     st.markdown(f"**선택:** {target_label}")
     cached = cache_get(target_id)
