@@ -764,283 +764,155 @@ def build_system_prompts(market, stock=None):
 
     return {
 
-# ────────────────────────────────────────────────────────────────────────────
-# 내러티브(Narrative) 정의:
-#   단순 뉴스 요약이 아닌, 시장 참여자들의 '집단적 상상력과 신념'이 만들어내는
-#   기업의 미래 제품/서비스/수익 성장에 대한 경제적 믿음의 흐름.
-#   "왜 이 기업이 앞으로 더 많이 팔게 될 것인가"에 대한 집단적 스토리.
-# ────────────────────────────────────────────────────────────────────────────
-
-"classifier": f"""{lang}
-{c_warn}
-
-## 내러티브 분류 전문가 역할
-당신의 임무는 단순한 뉴스 요약이 아닙니다.
-**시장이 {target}에 대해 어떤 집단적 믿음을 품고 있는지**를 포착하고,
-그 믿음이 현재 주가에 반영됐는지 여부를 판단하는 것입니다.
-
-## 내러티브란 무엇인가
-- 단순 사실이나 데이터가 아닌, **"왜 이 기업이 앞으로 더 잘될 것인가"에 대한 집단적 스토리**
-- 투자자들이 공유하는 상상력: "이 회사가 이 제품/서비스로 시장을 지배할 것"이라는 믿음
-- 예: "엔비디아 = AI 인프라의 독점 공급자" → 이 믿음이 주가 프리미엄의 원천
-
-## 분류 기준
-
-### 🔒 버킷 A: 이미 주가에 반영된 내러티브 (Priced-In)
-시장 참여자 대다수가 이미 공유하고 있어 현재 주가에 녹아든 집단적 믿음.
-각 항목: **[믿음의 내용]** + "반영 근거: [주가 반응, 반복 보도, 컨센서스 반영 여부]"
-
-### 🚀 버킷 B: 아직 주가에 반영되지 않은 미래 내러티브 (Not Yet Priced-In)
-시장이 아직 충분히 상상하거나 믿지 않아 현재 주가에 미반영된 잠재적 믿음.
-각 항목: **[새로운 믿음/상상의 내용]** + "미반영 근거: [왜 시장이 아직 이걸 안 믿는가]" + "실현 시 방향: [상승/하락/중립]"
-
-## ⚠️ 분류 판단 기준 (주가 컨텍스트 필수 활용)
-- 수개월째 반복 보도 + 주가 이미 반응 → Priced-In
-- 어닝콜에서 처음 언급 + 주가 미반응 → Not Yet Priced-In
-- 52주 고점 근처 + 강세 믿음 → 이미 상당 부분 반영
-- 리스크가 있는데 주가 안 내려갔음 → 그 리스크 믿음은 미반영
-
-## 📊 분류 요약
-- Priced-In: N개 / Not-Yet-Priced-In: N개
-- 지배적 내러티브: [한 문장으로 시장의 집단적 믿음 요약]
-- 분류 신뢰도: [높음/보통/낮음] + 낮으면 이유
-
-출처 명시.{warn}""",
-
-
 "bull": f"""{lang}
 
-## 내러티브 수집가 역할 — 강세 편향
-당신은 **{target}의 강세를 믿는 시장 참여자들이 공유하는 집단적 스토리**를 포착합니다.
-뉴스를 나열하는 것이 아니라, **"왜 이 기업이 앞으로 더 많이 팔게 될 것인가"에 대한 믿음의 구조**를 드러내야 합니다.
+## 강세 내러티브 발굴가
+당신은 {target}에 대해 **강세를 믿는 시장 참여자들이 공유하는 집단적 스토리**를 발굴합니다.
+아래 자료는 강세 방향에 유리한 정보를 타깃 수집한 결과입니다.
+뉴스를 나열하지 말고, "왜 이 기업이 앞으로 더 많이 팔게 될 것인가"의 믿음 구조를 드러내십시오.
 
-## 📈 {target} 강세 내러티브 (향후 3개월)
+## 📈 {target} 강세 내러티브
 
-### 1. 지배적 강세 내러티브 (핵심 집단 믿음)
-[한 문장으로: 강세 투자자들이 공유하는 핵심 스토리. 예: "X가 Y 시장을 Z 이유로 지배하게 될 것"]
+### ① 지배적 강세 내러티브 (집단 믿음 한 문장)
+[강세 투자자들이 공유하는 핵심 스토리]
 
-### 2. 내러티브의 인과 사슬
-[집단 믿음이 어떻게 연결되는가. 예:
- "AI 수요 폭증 → HBM 공급 부족 지속 → 삼성만 공급 가능 → 독점적 가격 결정력 → 실적 급등"]
+### ② 내러티브 인과 사슬
+[믿음이 어떻게 연결되는가. 예: "AI 수요 급증 → HBM 공급 부족 → 독점 가격결정력 → 실적 급등"]
 
-### 3. 🚀 아직 주가에 반영되지 않은 강세 내러티브 (투자 포인트)
-[이 섹션이 분석의 핵심. 시장이 아직 충분히 믿지 않아 미반영된 새로운 스토리]
-- 새로운 믿음: [내용]
-- 왜 아직 시장이 이걸 과소평가하는가
-- 이 믿음이 실현될 조건과 트리거
-- 실현 확률: [높음/중간/낮음]
+### ③ 🔒 이미 주가에 반영된 강세 요인 (Priced-In)
+[수개월째 공유된 믿음. 현재 주가에 이미 녹아 있음. 2-3줄. 반영 근거 포함]
 
-### 4. 🔒 이미 반영된 강세 요인 (참고용, 2-3줄)
-[현재 주가에 이미 녹아든 믿음들. 추가 상승의 근거가 되지 않음]
+### ④ 🚀 아직 주가에 반영되지 않은 강세 촉매 (Not Yet Priced-In) ← 핵심
+[시장이 아직 충분히 믿지 않아 미반영된 새로운 스토리. 각 촉매별:]
+- 새로운 믿음 / 왜 시장이 과소평가하는가 / 실현 조건·트리거 / 실현 확률 [높음/중간/낮음]
 
-### 5. 정량 근거
-[내러티브를 뒷받침하는 수치. 없으면 "정량 근거 부족" 명시]
+### ⑤ 정량 근거 [강세 내러티브를 뒷받침하는 수치. 없으면 "정량 근거 부족"]
 
-### 6. 집단 정서 (SNS·커뮤니티·어닝콜)
-[시장 참여자들이 이 내러티브를 얼마나 공유하고 있는가]
+### ⑥ 집단 정서 [SNS·커뮤니티·어닝콜에서 확인되는 공유 믿음 수준]
 
-### 7. 내러티브 강도 [1-10]: 집단 믿음의 깊이와 확산 정도
-### 8. 내러티브-정량 정합성 [1-10]: 스토리가 숫자로 뒷받침되는가
-### 9. 강세 내러티브 3줄 요약
+### ⑦ 강세 내러티브 강도 [1-10]: 집단 믿음의 깊이와 확산 정도
+### ⑧ 정량 정합성 [1-10]: 스토리가 숫자로 뒷받침되는가
+### ⑨ 강세 내러티브 3줄 요약
 
-출처 명시.{warn}""",
+출처(기관명, 날짜, URL) 명시.{warn}""",
 
 
 "neutral": f"""{lang}
 
-## 내러티브 수집가 역할 — 중립 편향
-**{target}에 대해 시장 참여자들이 방향을 정하지 못하는 이유**를 집단 믿음의 관점에서 포착합니다.
-"중립"은 믿음의 부재가 아니라, **서로 충돌하는 두 개의 강한 내러티브가 팽팽히 맞서는 상태**입니다.
+## 중립 내러티브 발굴가
+**{target}에 대해 시장이 방향을 정하지 못하는 이유**를 집단 믿음 관점에서 포착합니다.
+"중립"은 믿음 부재가 아니라 **서로 충돌하는 두 강한 내러티브가 팽팽히 맞서는 상태**입니다.
+아래 자료는 중립·균형 방향을 타깃 수집한 결과입니다.
 
-## ➡️ {target} 중립 내러티브 (향후 3개월)
+## ➡️ {target} 중립 내러티브
 
-### 1. 충돌하는 두 개의 집단 믿음
-- 강세 측 믿음: [한 문장]
-- 약세 측 믿음: [한 문장]
+### ① 충돌하는 두 집단 믿음
+- 강세 측 믿음: [한 문장] / 약세 측 믿음: [한 문장]
 - 왜 어느 쪽도 아직 지배적이지 않은가
 
-### 2. 내러티브 전환을 막는 구조
+### ② 내러티브 교착 구조
 [왜 시장이 한 방향으로 확신을 형성하지 못하는가]
 
-### 3. 🚀 아직 반영되지 않은 불확실 요인
-[방향을 결정할 아직 미반영된 정보나 이벤트]
-- 요인 내용 / 해소 트리거 / 예상 시점
+### ③ 🔒 이미 반영된 균형 요인 (Priced-In)
+[2-3줄. 현재 박스권 주가를 설명하는 이미 알려진 불확실성]
 
-### 4. 🔒 이미 반영된 균형 요인 (2-3줄)
+### ④ 🚀 아직 반영되지 않은 방향 결정 요인 (Not Yet Priced-In) ← 핵심
+[방향을 결정할 아직 시장이 소화하지 못한 정보. 각 요인별:]
+- 요인 내용 / 왜 시장이 아직 이를 소화 못했는가 / 해소 트리거·시점
 
-### 5. 정량 근거 / 집단 정서 (SNS·어닝콜)
-### 6. 중립 내러티브 강도 [1-10] / 정합성 [1-10]
-### 7. 중립 내러티브 3줄 요약
+### ⑤ 정량 근거 / ⑥ 집단 정서
+
+### ⑦ 중립 내러티브 강도 [1-10] / ⑧ 정량 정합성 [1-10]
+### ⑨ 중립 내러티브 3줄 요약
 
 출처 명시.{warn}""",
 
 
 "bear": f"""{lang}
 
-## 내러티브 수집가 역할 — 약세 편향
-**{target}의 미래 매출/이익이 시장 기대를 하회할 것이라는 집단적 불신의 구조**를 포착합니다.
-단순 리스크 나열이 아닌, **"왜 이 기업이 앞으로 덜 팔게 될 것인가"에 대한 믿음의 흐름**을 드러내야 합니다.
+## 약세 내러티브 발굴가
+**{target}의 미래 매출·이익이 기대를 하회할 것이라는 집단적 불신의 구조**를 포착합니다.
+아래 자료는 약세 방향에 유리한 정보를 타깃 수집한 결과입니다.
+리스크 나열이 아닌, "왜 이 기업이 앞으로 덜 팔게 될 것인가"의 믿음 흐름을 드러내십시오.
 
-## 📉 {target} 약세 내러티브 (향후 3개월)
+## 📉 {target} 약세 내러티브
 
-### 1. 지배적 약세 내러티브 (핵심 집단 불신)
-[한 문장으로: 약세 투자자들이 공유하는 핵심 스토리]
+### ① 지배적 약세 내러티브 (집단 불신 한 문장)
+[약세 투자자들이 공유하는 핵심 스토리]
 
-### 2. 내러티브의 인과 사슬
-[불신이 어떻게 연결되는가. 예:
- "경쟁사 진입 → 점유율 잠식 → ASP 하락 → 마진 압박 → 실적 하회"]
+### ② 내러티브 인과 사슬
+[불신이 어떻게 연결되는가. 예: "경쟁사 진입 → 점유율 잠식 → ASP 하락 → 마진 압박 → 실적 하회"]
 
-### 3. 🚀 아직 주가에 반영되지 않은 약세 리스크 (투자 주의 포인트)
-[시장이 아직 충분히 두려워하지 않아 미반영된 새로운 불신의 씨앗]
-- 새로운 불신: [내용]
-- 왜 아직 시장이 이 리스크를 과소평가하는가
-- 현실화 조건과 트리거
-- 현실화 확률: [높음/중간/낮음]
+### ③ 🔒 이미 주가에 반영된 약세 요인 (Priced-In)
+[2-3줄. 이미 하락에 녹아든 우려들. 추가 하락 압력 되기 어려움]
 
-### 4. 🔒 이미 반영된 약세 요인 (참고용, 2-3줄)
-[이미 주가에 녹아든 우려들. 추가 하락 압력 되기 어려움]
+### ④ 🚀 아직 주가에 반영되지 않은 약세 리스크 (Not Yet Priced-In) ← 핵심
+[시장이 아직 과소평가하는 새로운 불신의 씨앗. 각 리스크별:]
+- 새로운 불신 / 왜 시장이 아직 이 리스크를 두려워하지 않는가 / 현실화 조건·트리거 / 현실화 확률 [높음/중간/낮음]
 
-### 5. 정량 근거 / 집단 정서 (SNS·어닝콜)
-### 6. 약세 내러티브 강도 [1-10] / 정합성 [1-10]
-### 7. 약세 내러티브 3줄 요약
+### ⑤ 정량 근거 / ⑥ 집단 정서
+
+### ⑦ 약세 내러티브 강도 [1-10] / ⑧ 정량 정합성 [1-10]
+### ⑨ 약세 내러티브 3줄 요약
 
 출처 명시.{warn}""",
-
-
-"bull_critic": f"""{lang}
-{c_warn}
-
-## 강세 내러티브 비판가
-⚠️ 단순 팩트 체크가 아닙니다. **강세 측의 집단적 믿음 구조가 얼마나 취약한가**를 비판하십시오.
-
-## 🔥 강세 내러티브 해체 분석
-
-### 1. 핵심 내러티브의 균열
-[강세 측이 주장하는 인과 사슬에서 가장 약한 연결 고리]
-"A → B → C"라는 믿음에서 B가 실제로 성립하지 않는 이유
-
-### 2. "미반영 촉매"의 실제 반영 여부 재검토
-[강세 측이 미반영이라 주장하지만, 실제로는 이미 가격에 녹아있는 항목들]
-
-### 3. 집단 믿음이 만든 과도한 낙관 편향
-[강세 내러티브가 집단적으로 과장된 부분]
-
-### 4. 정량 근거의 취약성
-[숫자가 스토리를 뒷받침하지 못하는 부분]
-
-### 5. 강세 내러티브가 붕괴할 시나리오
-[어떤 이벤트가 집단 믿음을 깨트리는가]
-
-### 6. 강세 내러티브 신뢰도 [1-10점 및 2줄 평가]""",
-
-
-"neutral_critic": f"""{lang}
-{c_warn}
-
-## 중립 내러티브 비판가
-⚠️ **중립이 진정한 균형인지, 아니면 방향 판단을 회피하는 것인지**를 비판하십시오.
-
-## 🔥 중립 내러티브 해체 분석
-
-### 1. 거짓 균형의 함정
-[충돌하는 두 내러티브 중 실제로는 한쪽이 더 강한가]
-
-### 2. 미반영 요인 중 방향성이 명확한 것
-[중립이 "불확실하다"고 처리했지만, 실제론 방향이 보이는 항목]
-
-### 3. 비대칭 리스크
-[상승 가능성과 하락 리스크 중 어느 쪽이 더 크고 과소평가됐는가]
-
-### 4. 집단 믿음 형성 방향
-[현재 SNS·커뮤니티·기관 수급에서 믿음이 어느 방향으로 기울고 있는가]
-
-### 5. 중립 내러티브가 붕괴할 시나리오
-### 6. 중립 내러티브 신뢰도 [1-10점 및 2줄 평가]""",
-
-
-"bear_critic": f"""{lang}
-{c_warn}
-
-## 약세 내러티브 비판가
-⚠️ **약세 측의 집단적 불신 구조가 얼마나 취약한가**를 비판하십시오.
-
-## 🔥 약세 내러티브 해체 분석
-
-### 1. 핵심 불신의 균열
-[약세 측의 인과 사슬에서 가장 약한 연결 고리]
-
-### 2. "미반영 리스크"의 실제 반영 여부 재검토
-[약세 측이 미반영이라 주장하지만 이미 가격에 녹아있는 항목들]
-
-### 3. 집단 믿음이 만든 과도한 비관 편향
-[약세 내러티브가 집단적으로 과장된 부분]
-
-### 4. 정량 근거의 취약성
-### 5. 약세 내러티브가 붕괴할 시나리오
-[어떤 이벤트가 집단적 불신을 무너뜨리는가]
-
-### 6. 약세 내러티브 신뢰도 [1-10점 및 2줄 평가]""",
 
 
 "judge": f"""{lang}
 {c_warn}
 
-## 수석 내러티브 판정관 역할
+## 수석 내러티브 판정관
 
-### 핵심 판정 철학
-내러티브란 **시장 참여자들의 집단적 상상력과 신념이 형성하는 경제적 믿음의 흐름**입니다.
-판정의 질문은 단 하나입니다:
-**"향후 3개월간 어떤 집단 믿음이 가장 강하게 확산될 것인가?"**
+### 판정 철학
+세 개의 독립 내러티브(각자 타깃 검색 기반)를 비교 평가합니다.
+핵심 질문: **"향후 3개월간 어떤 집단 믿음이 가장 강하게 확산될 것인가?"**
 
-- 이미 공유된 믿음(Priced-In)은 현재 주가에 녹아 있음 → 추가 alpha 없음
-- 아직 형성 중인 믿음(Not Yet Priced-In)이 주가를 움직임 → 판정의 핵심
+- Priced-In 내러티브 → 현재 주가에 이미 반영, 추가 alpha 없음
+- Not Yet Priced-In → 주가를 움직임, 판정의 핵심
 
-⚠️ 금지:
-- Priced-In 내러티브를 판정 근거로 삼지 말 것
-- 목표가·투자의견 자체가 판정 근거가 되지 않도록
-- {cutoff_str_ko} 이전 자료 채택 금지
+⚠️ 금지: Priced-In 요인을 판정 주근거로 삼지 말 것 / 목표가 중심 판정 금지 / {cutoff_str_ko} 이전 자료 금지
 
 ## 핵심 요약
 [4문장:
- 1. 향후 3개월 가장 강하게 확산될 집단 믿음과 그 이유
- 2. 그 믿음의 인과 사슬 (A→B→C→주가 상승/하락)
- 3. 경쟁 내러티브의 집단 믿음이 약한 이유
- 4. 이 내러티브를 붕괴시킬 핵심 역(逆)내러티브]
+ 1. 향후 3개월 가장 강하게 확산될 집단 믿음
+ 2. 그 믿음의 인과 사슬 (A→B→C→주가 방향)
+ 3. 경쟁 내러티브의 결정적 약점
+ 4. 이 판정을 뒤집을 역(逆)내러티브]
 
 ## ⚡ 최종 판정
 
 ### 가장 그럴듯한 내러티브: [강세 / 중립 / 약세]
 
+### 세 내러티브 비교 평가
+| 항목 | 강세 | 중립 | 약세 |
+|---|---|---|---|
+| 내러티브 강도 | /10 | /10 | /10 |
+| 정량 정합성 | /10 | /10 | /10 |
+| Priced-In 비중 | - | - | - |
+| Not-Yet 질 | 높음/중간/낮음 | - | - |
+| 집단 확산 속도 | 빠름/중간/느림 | - | - |
+
 ### 지배적 집단 믿음 (한 문장)
-[시장이 앞으로 3개월간 가장 강하게 공유할 경제적 믿음]
+[향후 3개월 시장이 가장 강하게 공유할 경제적 믿음]
 
-### Priced-In vs Not-Yet-Priced-In 요약
-**이미 반영된 믿음 (Priced-In):**
-[현재 주가를 설명하는 기존 집단 믿음. 추가 움직임의 근거 안 됨.]
+### Not Yet Priced-In 핵심 (판정 근거)
+**선택 내러티브의 미반영 요인:**
+[3-5개. 믿음 내용 / 왜 미반영인가 / [강세 촉매 / 약세 리스크]]
 
-**아직 형성 중인 믿음 (Not Yet Priced-In) — 판정의 핵심:**
-[각 항목: 믿음 내용 / 확산 속도 / [강세 촉매 / 약세 리스크 / 불확실]]
-
-### 내러티브 강도 평가
-- 강세 믿음의 깊이: [1-10] / 중립 불확실성 강도: [1-10] / 약세 불신의 깊이: [1-10]
-
-### 정량 뒷받침 강도
-- 강세: [1-10] / 중립: [1-10] / 약세: [1-10]
+**탈락 내러티브의 Not Yet 주장이 약한 이유:**
+[왜 경쟁 내러티브의 미반영 주장이 덜 설득력 있는가]
 
 ### 판정 이유
 [왜 이 방향의 집단 믿음이 가장 강하게 확산될 것인가.
- 내러티브의 인과 사슬 완결성 + 정량 정합성 + 집단 확산 속도를 함께 서술.]
+ 내러티브 인과 사슬 완결성 + 정량 정합성 + 집단 확산 속도 함께 서술.]
 
 ### 현재 가격 기준 상황 [보조 정보. 짧게.]
 
-### 판정을 뒷받침하는 핵심 근거
+### 핵심 근거 (Not Yet Priced-In 중심)
 **근거 1:** / **근거 2:** / **근거 3:** / **근거 4:** / **근거 5:**
 
-### 경쟁 내러티브 탈락 이유
-[경쟁 진영의 집단 믿음이 왜 더 약하거나 이미 소진됐는가]
-
 ### 해당 내러티브 지지 애널리스트 평균 TP (참고용)
-[확인된 경우만. n수 + 현재가 대비 implied upside/downside. 없으면 "확인 가능한 TP 부족"]
+[확인된 경우만. n수 + implied upside/downside. 없으면 "확인 가능한 TP 부족"]
 
 ### 확률 분포
 **강세장 (유의미한 상승): XX%**
@@ -1048,8 +920,9 @@ def build_system_prompts(market, stock=None):
 **약세장 (유의미한 하락): XX%**
 
 ### 내러티브 실현 트리거 (상위 3개)
-[각 트리거: 이벤트 / 예상 시점 / 집단 믿음에 미치는 영향]""",
+[트리거 이벤트 / 예상 시점 / 집단 믿음에 미치는 영향]""",
     }
+
 
 
 
@@ -1158,87 +1031,88 @@ def _fetch_price_action_context(target: str, ticker_raw: str, market_id: str) ->
 
 # ─── CORE ANALYSIS ────────────────────────────────────────────────────────────
 def _run_analysis_core(target_id, target_label, market, stock, prompts):
-    results={}
-    target_short=stock[1] if stock else market["index"]
-    sector=stock[2] if stock else ""; ticker_raw=stock[0] if stock else ""
-    update_progress(target_id,0.05,"🔍 공통 증거 수집 중...")
-    try:
-        shared=combined_search(target_short,"neutral",market["index"],sector=sector,ticker_raw=ticker_raw,market_id=market["id"])
-    except Exception as e:
-        shared=f"⚠️ 공통 검색 오류: {e}"
+    """
+    새 구조 (4단계):
+    Phase 1: 방향별 독립 타깃 검색 → 내러티브 직접 추출 (강세/중립/약세 각각)
+    Phase 2: Judge가 세 내러티브 비교 평가 → 최종 판정
+    (비판 에이전트 제거 — 내러티브 자체에 Priced-In/Not 판단 포함)
+    """
+    results = {}
+    target_short = stock[1] if stock else market["index"]
+    sector = stock[2] if stock else ""
+    ticker_raw = stock[0] if stock else ""
 
-    # ── Phase 0.5: 내러티브 분류 에이전트 ─────────────────────────────────────
-    update_progress(target_id,0.09,"📊 주가 컨텍스트 수집 + 내러티브 분류 중...")
-
-    # 분류 정확도를 높이기 위한 주가 컨텍스트 수집
+    # ── 공통: 주가 컨텍스트 수집 (Priced-In 판단 보조) ──────────────────────
+    update_progress(target_id, 0.05, "📊 주가 컨텍스트 수집 중...")
     price_action_ctx = _fetch_price_action_context(target_short, ticker_raw, market["id"])
 
-    try:
-        classifier_input=(
-            f"다음은 오늘({datetime.now().strftime('%Y년 %m월 %d일')}) 기준 "
-            f"{target_label}에 관한 원자료와 주가 컨텍스트입니다.\n\n"
-            f"【주가 컨텍스트 — 반영 여부 판단의 핵심 근거】\n"
-            f"{price_action_ctx}\n\n"
-            f"{'='*50}\n\n"
-            f"【원자료】\n{shared}\n\n"
-            f"위 주가 컨텍스트(최근 주가 흐름, 52주 고저가 위치, 최근 이벤트 후 반응)를 "
-            f"반드시 참고하여 각 내러티브·사실·이벤트를 분류하십시오."
-        )
-        narrative_map = strip_duplicate_translation(
-            call_llm(prompts["classifier"], classifier_input, max_tokens=3000, market_id=market["id"])
-        )
-        results["classifier"] = narrative_map
-    except Exception as e:
-        narrative_map = "[분류 실패 — 원자료 직접 활용]"
-        results["classifier"] = f"⚠️ 오류: {e}"
+    today = datetime.now().strftime("%Y년 %m월 %d일")
 
-    # 분류 결과를 에이전트 컨텍스트에 추가
-    enriched_context = (
-        f"【주가 컨텍스트】\n{price_action_ctx}\n\n"
-        f"{'='*60}\n\n"
-        f"【내러티브 분류 결과 (Priced-In / Not Yet Priced-In)】\n"
-        f"{narrative_map}\n\n"
-        f"{'='*60}\n\n"
-        f"【원자료】\n{shared}"
-    )
-    for i,(agent,dir_label) in enumerate([("bull","강세"),("neutral","중립"),("bear","약세")]):
-        pct=0.15+i*0.11
-        update_progress(target_id,pct,f"🤖 {AGENT_LABELS[agent]} — 미반영 내러티브 구성 중...")
+    # ── Phase 1: 방향별 독립 타깃 검색 → 내러티브 추출 ──────────────────────
+    direction_map = [
+        ("bull",    "강세", 0.12),
+        ("neutral", "중립", 0.38),
+        ("bear",    "약세", 0.62),
+    ]
+
+    for agent, dir_label, pct in direction_map:
+        update_progress(target_id, pct, f"🔍 {dir_label} 방향 타깃 검색 + 내러티브 구성 중...")
         try:
-            uc=(f"다음은 오늘({datetime.now().strftime('%Y년 %m월 %d일')}) 기준 "
-                f"{target_label}에 관한 원자료와 내러티브 분류 결과입니다.\n\n"
-                f"{enriched_context}\n\n"
-                f"이 자료를 바탕으로 {dir_label} 내러티브를 구성하십시오.\n"
-                f"⚠️ 핵심: '아직 주가에 반영되지 않은(Not Yet Priced-In)' 촉매/리스크에 분석의 70%를 집중하십시오.\n"
-                f"이미 반영된(Priced-In) 요인은 현재 주가 수준을 설명할 뿐, 향후 수익률의 근거가 되지 않습니다.")
-            results[agent]=strip_duplicate_translation(call_llm(prompts[agent],uc,market_id=market["id"]))
-        except Exception as e: results[agent]=f"⚠️ 오류: {e}"
-    update_progress(target_id,0.45,"Phase 2 · 비판 검증 시작.")
-    critic_map={"bull_critic":("bull","강세"),"neutral_critic":("neutral","중립"),"bear_critic":("bear","약세")}
-    for i,agent in enumerate(["bull_critic","neutral_critic","bear_critic"]):
-        src,label=critic_map[agent]
-        update_progress(target_id,0.45+i*0.12,f"🔥 {AGENT_LABELS[agent]} — 비판 중.")
-        try:
-            uc=(f"[{label} 내러티브]:\n{results.get(src,'')}\n\n위 내러티브를 냉정하게 비판하시오.\n"
-                f"중요: 서사의 빈약함, 인과 연결의 약함, 누락된 반대 증거를 중심으로 비판하시오.")
-            results[agent]=strip_duplicate_translation(call_llm(prompts[agent],uc,market_id=market["id"]))
-        except Exception as e: results[agent]=f"⚠️ 오류: {e}"
-    update_progress(target_id,0.82,"📡 현재 주가 조회 + 최종 판정 중.")
+            # 방향별 타깃 검색 (강세는 강세 자료, 약세는 약세 자료를 수집)
+            targeted_data = combined_search(
+                target_short, agent, market["index"],
+                sector=sector, ticker_raw=ticker_raw, market_id=market["id"]
+            )
+            update_progress(target_id, pct + 0.10,
+                            f"🤖 {AGENT_LABELS[agent]} — 내러티브 발굴 중...")
+
+            uc = (
+                f"오늘({today}) 기준 {target_label}의 {dir_label} 방향을 지지하는 자료를 타깃 수집했습니다.\n\n"
+                f"【주가 컨텍스트 — Priced-In 판단 보조】\n{price_action_ctx}\n\n"
+                f"{'='*50}\n\n"
+                f"【{dir_label} 방향 타깃 수집 자료】\n{targeted_data}\n\n"
+                f"위 자료를 바탕으로 {dir_label} 내러티브를 발굴하십시오.\n"
+                f"핵심: ④항 'Not Yet Priced-In'에 집중하십시오 — 이것이 향후 주가를 움직입니다."
+            )
+            results[agent] = strip_duplicate_translation(
+                call_llm(prompts[agent], uc, market_id=market["id"])
+            )
+        except Exception as e:
+            results[agent] = f"⚠️ 오류: {e}"
+
+    # ── Phase 2: Judge — 세 내러티브 비교 판정 ───────────────────────────────
+    update_progress(target_id, 0.88, "📡 현재 주가 조회 + 최종 판정 중...")
     try:
-        price_ctx=fetch_current_price(target_short,ticker_raw,market["id"])
-        judge_input=(f"【실시간 현재가 — 참고 정보】\n{price_ctx}\n\n{'='*50}\n\n"
-            + "\n\n".join(f"[{AGENT_LABELS[a]}]:\n{results.get(a,'')}" for a in ["bull","neutral","bear","bull_critic","neutral_critic","bear_critic"])
-            + "\n\n최종 판정을 내리시오. 현재가는 보조 정보이며, 판단의 중심은 내러티브의 설득력·인과 구조·반증 대응력이어야 한다.")
-        results["judge"]=strip_duplicate_translation(call_llm(prompts["judge"],judge_input,max_tokens=8000,market_id=market["id"]))
-    except Exception as e: results["judge"]=f"⚠️ 오류: {e}"
-    update_progress(target_id,0.98,"✅ 저장 중...")
-    bp,np_,rp=extract_probs(results.get("judge",""))
-    bp=bp or 50; np_=np_ or 30; rp=rp or 20
-    winner=winner_from_probs(bp,np_,rp)
-    if bp==50 and np_==30 and rp==20: winner=extract_winner(results.get("judge","")) or "neutral"
-    cache_set(target_id,market["id"],target_label,results,winner,bull_prob=bp,neutral_prob=np_,bear_prob=rp,status="done")
-    update_progress(target_id,1.0,"✅ 분석 완료!")
-    return results,winner
+        price_ctx = fetch_current_price(target_short, ticker_raw, market["id"])
+        judge_input = (
+            f"【실시간 현재가 — 참고 정보】\n{price_ctx}\n\n"
+            f"{'='*60}\n\n"
+            f"아래는 각 방향별 타깃 검색을 통해 독립적으로 발굴된 세 개의 내러티브입니다.\n"
+            f"각 내러티브는 Priced-In(이미 반영)과 Not Yet Priced-In(미반영)을 자체적으로 구분하고 있습니다.\n\n"
+            + "\n\n".join(
+                f"{'='*40}\n[{AGENT_LABELS[a]}]:\n{results.get(a, '')}"
+                for a in ["bull", "neutral", "bear"]
+            )
+            + f"\n\n{'='*60}\n\n"
+            f"세 내러티브를 비교 평가하여 최종 판정을 내리십시오.\n"
+            f"판단의 핵심: 어느 방향의 'Not Yet Priced-In' 내러티브가 가장 설득력 있고 실현 가능성이 높은가?"
+        )
+        results["judge"] = strip_duplicate_translation(
+            call_llm(prompts["judge"], judge_input, max_tokens=8000, market_id=market["id"])
+        )
+    except Exception as e:
+        results["judge"] = f"⚠️ 오류: {e}"
+
+    update_progress(target_id, 0.98, "✅ 저장 중...")
+    bp, np_, rp = extract_probs(results.get("judge", ""))
+    bp = bp or 50; np_ = np_ or 30; rp = rp or 20
+    winner = winner_from_probs(bp, np_, rp)
+    if bp == 50 and np_ == 30 and rp == 20:
+        winner = extract_winner(results.get("judge", "")) or "neutral"
+    cache_set(target_id, market["id"], target_label, results, winner,
+              bull_prob=bp, neutral_prob=np_, bear_prob=rp, status="done")
+    update_progress(target_id, 1.0, "✅ 분석 완료!")
+    return results, winner
 
 
 # ─── DISPLAY ──────────────────────────────────────────────────────────────────
@@ -1260,19 +1134,21 @@ def display_results(results, winner, cached_at=None):
         c2.metric("➡️ 보합장",f"{np_}%"); c2.progress(np_/100)
         c3.metric("📉 약세장",f"{rp}%"); c3.progress(rp/100)
     st.markdown("---")
-    # 분류 결과 (핵심 요약)
-    if results.get("classifier") and "⚠️" not in results.get("classifier",""):
-        with st.expander("🗂 내러티브 분류 결과 (Priced-In vs Not Yet Priced-In)", expanded=True):
-            st.markdown(results.get("classifier",""))
-        st.markdown("---")
-    st.markdown("### Phase 1 · 내러티브 수집 (미반영 요인 중심)")
-    for a in ["bull","neutral","bear"]:
-        with st.expander(AGENT_LABELS[a]): st.markdown(results.get(a,"결과 없음"))
-    st.markdown("### Phase 2 · 비판 검증")
-    for a in ["bull_critic","neutral_critic","bear_critic"]:
-        with st.expander(AGENT_LABELS[a]): st.markdown(results.get(a,"결과 없음"))
-    st.markdown("### Phase 3 · 최종 판정")
-    with st.expander("⚡ 최종 판정자 전문",expanded=True): st.markdown(results.get("judge","결과 없음"))
+    st.markdown("### 📈 강세 내러티브")
+    with st.expander(AGENT_LABELS["bull"], expanded=False):
+        st.markdown(results.get("bull","결과 없음"))
+
+    st.markdown("### ➡️ 중립 내러티브")
+    with st.expander(AGENT_LABELS["neutral"], expanded=False):
+        st.markdown(results.get("neutral","결과 없음"))
+
+    st.markdown("### 📉 약세 내러티브")
+    with st.expander(AGENT_LABELS["bear"], expanded=False):
+        st.markdown(results.get("bear","결과 없음"))
+
+    st.markdown("### ⚡ 최종 판정")
+    with st.expander(AGENT_LABELS["judge"], expanded=True):
+        st.markdown(results.get("judge","결과 없음"))
 
 def display_leaderboard():
     rows=load_leaderboard()
@@ -1314,7 +1190,7 @@ def main():
     with col_title:
         qw=get_ollama_model('kospi200'); ll=get_ollama_model('sp500'); gm=get_ollama_model('nikkei225')
         st.markdown(f"""<h1 style='background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-size:26px;margin:0'>
-        ⚡ [시장/종목] 내러티브 앤 넘버스 수집 및 분석 v1.01.00</h1>
+        ⚡ [시장/종목] 내러티브 앤 넘버스 수집 및 분석 v2.00.00</h1>
         <p style='color:#4a5568;font-size:11px;letter-spacing:2px;margin:2px 0 0'>7-AGENT AI · 향후 3개월 판정 · 🇰🇷{qw} / 🇺🇸{ll} / 🇯🇵{gm}</p>""",unsafe_allow_html=True)
     with col_info:
         ollama_url=get_ollama_url()
