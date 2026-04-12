@@ -234,19 +234,108 @@ def build_queries(target, direction, market_index, sector="", market_id="sp500",
     alias_main = canonical
     alias_or = " OR ".join([f'"{a}"' for a in aliases])
     sector_txt = f" {sector}" if sector else ""
+
+    # 한국 기업용 영문 검색어 (티커.KS 또는 종목명 영문)
+    # 예: "Samsung Electronics" "005930.KS" "Samsung Electronics KOSPI"
+    ko_en_aliases = [a for a in aliases if re.search(r'[A-Za-z]', a)]  # 영문 포함 alias
+    ko_en_main = ko_en_aliases[0] if ko_en_aliases else alias_main
+    # 티커 KS suffix
+    ks_ticker = f"{ticker_raw}.KS" if ticker_raw and market_id=="kospi200" else ""
+
     if market_id == "kospi200":
-        tq=[f'{alias_or} 최근 뉴스 사업 전략 경쟁 리스크',f'{alias_or}{sector_txt} 실적 발표 수익성 수요 마진',f'{alias_or} 투자 포인트 우려 요인',f'{market_index} 최근 전망 거시 수급 금리 환율']
-        eq=[f'{alias_main} investment thesis strategy risk catalyst',f'{alias_main} earnings release investor relations profitability',f'{alias_main}{sector_txt} competition demand margin capex',f'{alias_main} regulatory risk execution narrative']
-        quant=[f'{alias_or} 매출 영업이익 영업이익률 순이익 EPS 전망',f'{alias_or} 가이던스 CAPEX 수주 backlog 신규수주',f'{alias_or} 공시 실적 발표 수치 YoY QoQ',f'{alias_or} 사업보고서 분기보고서 주석 수치']
+        # ── 국내 한국어 쿼리 ───────────────────────────────────────────────────
+        tq = [
+            f'{alias_or} 최근 뉴스 사업 전략 경쟁 리스크',
+            f'{alias_or}{sector_txt} 실적 발표 수익성 수요 마진',
+            f'{alias_or} 투자 포인트 우려 요인',
+            f'{market_index} 최근 전망 거시 수급 금리 환율',
+        ]
+        # ── 해외 시각 영문 쿼리 (신규) ─────────────────────────────────────────
+        tq_global = [
+            f'{ko_en_main} stock analyst rating target price Wall Street',
+            f'{ko_en_main} {sector_txt} foreign investor outlook global',
+            f'{ks_ticker or ko_en_main} Bloomberg Reuters Morgan Stanley Goldman',
+            f'Korea {sector_txt} sector outlook global fund institutional view',
+        ]
+        # ── Exa: 국내 IR·공시 ─────────────────────────────────────────────────
+        eq = [
+            f'{alias_main} investment thesis strategy risk catalyst',
+            f'{alias_main} earnings release investor relations profitability',
+            f'{alias_main}{sector_txt} competition demand margin capex',
+            f'{alias_main} regulatory risk execution narrative',
+        ]
+        # ── Exa: 해외 리포트 전용 (신규) ──────────────────────────────────────
+        eq_global = [
+            f'{ko_en_main} buy sell hold analyst report {sector_txt}',
+            f'{ko_en_main} Korea stock ADR institutional investor',
+            f'{ko_en_main} earnings growth valuation peer comparison',
+        ]
+        quant = [
+            f'{alias_or} 매출 영업이익 영업이익률 순이익 EPS 전망',
+            f'{alias_or} 가이던스 CAPEX 수주 backlog 신규수주',
+            f'{alias_or} 공시 실적 발표 수치 YoY QoQ',
+            f'{alias_or} 사업보고서 분기보고서 주석 수치',
+        ]
+
     elif market_id == "nikkei225":
-        tq=[f'{alias_or} 最新ニュース 事業戦略 競争 リスク',f'{alias_or}{sector_txt} 決算 収益性 需要 マージン',f'{alias_or} 投資ポイント 懸念材料',f'{market_index} 見通し 金利 為替 マクロ']
-        eq=[f'{alias_main} investment thesis strategy risk catalyst',f'{alias_main} earnings release investor relations profitability',f'{alias_main}{sector_txt} competition demand margin capex',f'{alias_main} regulatory risk execution narrative']
-        quant=[f'{alias_or} 売上 営業利益 EPS ガイダンス',f'{alias_or} CAPEX 受注 backlog 需要',f'{alias_or} 決算短信 数値 YoY QoQ',f'{alias_or} 有価証券報告書 注記 数値']
-    else:
-        tq=[f'{alias_or} latest news strategy competition risk',f'{alias_or}{sector_txt} earnings profitability demand margins',f'{alias_or} key debate catalysts concerns',f'{market_index} latest outlook macro rates positioning']
-        eq=[f'{alias_main} investment thesis strategy risk catalyst',f'{alias_main} earnings release investor relations profitability',f'{alias_main}{sector_txt} competition demand margin capex',f'{alias_main} regulatory risk execution narrative']
-        quant=[f'{alias_or} revenue operating margin EPS guidance YoY QoQ',f'{alias_or} capex bookings backlog order demand numbers',f'{alias_or} annual report 10-Q 10-K financial metrics',f'{alias_or} notes to financial statements quantitative disclosure']
-    return {"entity":entity,"tavily":tq,"exa_report":eq,"exa_sns":_build_sns_queries(alias_main,"neutral",market_id),"quant":quant}
+        tq = [
+            f'{alias_or} 最新ニュース 事業戦略 競争 リスク',
+            f'{alias_or}{sector_txt} 決算 収益性 需要 マージン',
+            f'{alias_or} 投資ポイント 懸念材料',
+            f'{market_index} 見通し 金利 為替 マクロ',
+        ]
+        tq_global = [
+            f'{alias_main} Japan stock analyst rating global investor',
+            f'{alias_main} {sector_txt} institutional view Bloomberg Reuters',
+        ]
+        eq = [
+            f'{alias_main} investment thesis strategy risk catalyst',
+            f'{alias_main} earnings release investor relations profitability',
+            f'{alias_main}{sector_txt} competition demand margin capex',
+            f'{alias_main} regulatory risk execution narrative',
+        ]
+        eq_global = [
+            f'{alias_main} Japan ADR foreign investor analyst report',
+            f'{alias_main} earnings growth valuation peer comparison global',
+        ]
+        quant = [
+            f'{alias_or} 売上 営業利益 EPS ガイダンス',
+            f'{alias_or} CAPEX 受注 backlog 需要',
+            f'{alias_or} 決算短信 数値 YoY QoQ',
+            f'{alias_or} 有価証券報告書 注記 数値',
+        ]
+
+    else:  # sp500
+        tq = [
+            f'{alias_or} latest news strategy competition risk',
+            f'{alias_or}{sector_txt} earnings profitability demand margins',
+            f'{alias_or} key debate catalysts concerns',
+            f'{market_index} latest outlook macro rates positioning',
+        ]
+        tq_global = []  # 미국은 이미 글로벌 시각이 기본
+        eq = [
+            f'{alias_main} investment thesis strategy risk catalyst',
+            f'{alias_main} earnings release investor relations profitability',
+            f'{alias_main}{sector_txt} competition demand margin capex',
+            f'{alias_main} regulatory risk execution narrative',
+        ]
+        eq_global = []
+        quant = [
+            f'{alias_or} revenue operating margin EPS guidance YoY QoQ',
+            f'{alias_or} capex bookings backlog order demand numbers',
+            f'{alias_or} annual report 10-Q 10-K financial metrics',
+            f'{alias_or} notes to financial statements quantitative disclosure',
+        ]
+
+    return {
+        "entity":     entity,
+        "tavily":     tq,
+        "tavily_global": tq_global,       # 해외 시각 Tavily 쿼리
+        "exa_report": eq,
+        "exa_global": eq_global,          # 해외 시각 Exa 쿼리
+        "exa_sns":    _build_sns_queries(alias_main, "neutral", market_id),
+        "quant":      quant,
+    }
 
 def extract_numeric_sentences(text, max_sentences=5):
     if not text: return []
@@ -294,7 +383,18 @@ def search_exa_reports(queries, entity_info=None, recent_days=120, market_id="sp
     try:
         client = get_exa()
         start_date = (datetime.now()-timedelta(days=recent_days)).strftime("%Y-%m-%dT00:00:00.000Z")
-        domain_map = {"sp500":["sec.gov","reuters.com","bloomberg.com","wsj.com","seekingalpha.com","marketwatch.com"],"kospi200":["dart.fss.or.kr","fnguide.com","hankyung.com","mk.co.kr","edaily.co.kr","thebell.co.kr"],"nikkei225":["nikkei.com","kabutan.jp","minkabu.jp","toyokeizai.net"]}
+        domain_map = {
+            "sp500":    ["sec.gov","reuters.com","bloomberg.com","wsj.com","seekingalpha.com","marketwatch.com","ft.com","barrons.com"],
+            # KOSPI: 국내 IR·공시 도메인 (해외 리포트는 eq_global 별도 처리)
+            "kospi200": ["dart.fss.or.kr","fnguide.com","hankyung.com","mk.co.kr","edaily.co.kr","thebell.co.kr"],
+            "nikkei225":["nikkei.com","kabutan.jp","minkabu.jp","toyokeizai.net"],
+        }
+        # 한국·일본 기업 해외 시각 전용 도메인
+        global_domains = [
+            "bloomberg.com","reuters.com","ft.com","wsj.com",
+            "seekingalpha.com","barrons.com","marketwatch.com",
+            "morningstar.com","fool.com","cnbc.com",
+        ]
         include_domains = domain_map.get(market_id, [])
         additional = []
         if entity_info:
@@ -594,23 +694,64 @@ def search_naver_sns(target: str, ticker: str = "") -> list[dict]:
     return _naver_search_raw(queries, display=5, max_total=12)
 
 
+
+def search_naver_ir(target: str, ticker: str = "") -> list[dict]:
+    """
+    IR·공시·사업보고서·증권사 리포트 전용 네이버 검색.
+    Exa domestic(dart·fnguide)을 대체.
+    """
+    queries = [
+        f"{target} IR 투자자설명회 기업설명회",
+        f"{target} 사업보고서 분기보고서 반기보고서",
+        f"{target} 증권사 리포트 분석 투자의견",
+        f"{target} 공시 주요사항 보고서 신규수주",
+        f"{target} 애널리스트 분석 목표주가 리포트",
+    ]
+    if ticker:
+        queries.append(f"{ticker} DART 공시 사업")
+    return _naver_search_raw(queries, display=8, max_total=25)
+
+
 def combined_search(target, direction, market_index, sector="", ticker_raw="", market_id="sp500"):
     qs = build_queries(target, direction, market_index, sector, market_id, ticker_raw=ticker_raw)
-    tr = search_tavily(qs["tavily"])
-    er = search_exa_reports(qs["exa_report"], entity_info=qs.get("entity"), recent_days=120, market_id=market_id)
-    sr = search_tavily_sns(qs["exa_sns"], market_id=market_id)
-    qr = collect_quant_evidence(qs["quant"], entity_info=qs.get("entity"), market_id=market_id, target=target, ticker_raw=ticker_raw)
-    et = fetch_earnings_transcript(ticker_raw, target_name=target, market_id=market_id) if ticker_raw else "[지수 — 어닝콜 해당 없음]"
-    fs = fetch_fmp_financial_snapshot(ticker_raw, market_id=market_id) if ticker_raw else None
+    entity = qs.get("entity")
 
-    # ── 한국 시장 전용: 네이버 API 다중 목적 수집 ──────────────────────────────
-    naver_news    = []
-    naver_quant_r = []
-    naver_sns_r   = []
     if market_id == "kospi200":
-        naver_news    = search_naver(target, direction, ticker_raw)        # 내러티브·리포트
-        naver_quant_r = search_naver_quant(target, ticker_raw)             # 재무 수치
-        naver_sns_r   = search_naver_sns(target, ticker_raw)               # 종토방 여론
+        # ══ 한국 기업: 국내 뉴스·IR → 네이버 API가 훨씬 정확 ══════════════════
+        # ① 국내 뉴스 (Tavily 대체)
+        naver_news    = search_naver(target, direction, ticker_raw)
+        # ② 국내 IR·공시·증권사 리포트 (Exa domestic 대체)
+        naver_ir      = search_naver_ir(target, ticker_raw)
+        # ③ 재무 정량
+        naver_quant_r = search_naver_quant(target, ticker_raw)
+        # ④ 커뮤니티·종토방 (Tavily SNS 대체)
+        naver_sns_r   = search_naver_sns(target, ticker_raw)
+        # ⑤ 어닝콜·실적 (네이버+Tavily 혼합, 기존 유지)
+        et = fetch_earnings_transcript(ticker_raw, target_name=target, market_id=market_id) if ticker_raw else "[지수 — 어닝콜 해당 없음]"
+        # ⑥ 해외 시각: Tavily global + Exa global (Bloomberg·Reuters·SA)
+        tr_global = search_tavily(qs["tavily_global"]) if qs.get("tavily_global") else []
+        er_global = (
+            search_exa_reports(qs["exa_global"], entity_info=entity, recent_days=120, market_id="sp500")
+            if qs.get("exa_global") else []
+        )
+        # 정량 근거: 네이버 quant만 사용 (Tavily/Exa quant 불필요)
+        qr = collect_quant_evidence([], entity_info=entity, market_id=market_id, target=target, ticker_raw=ticker_raw)
+        tr, er, sr, fs = [], [], [], None  # 국내 Tavily/Exa 비활성화
+
+    else:
+        # ══ 미국·일본: 기존 Tavily + Exa 사용 ═══════════════════════════════
+        tr = search_tavily(qs["tavily"])
+        er = search_exa_reports(qs["exa_report"], entity_info=entity, recent_days=120, market_id=market_id)
+        sr = search_tavily_sns(qs["exa_sns"], market_id=market_id)
+        qr = collect_quant_evidence(qs["quant"], entity_info=entity, market_id=market_id, target=target, ticker_raw=ticker_raw)
+        et = fetch_earnings_transcript(ticker_raw, target_name=target, market_id=market_id) if ticker_raw else "[지수 — 어닝콜 해당 없음]"
+        fs = fetch_fmp_financial_snapshot(ticker_raw, market_id=market_id) if ticker_raw else None
+        tr_global = search_tavily(qs["tavily_global"]) if qs.get("tavily_global") else []
+        er_global = (
+            search_exa_reports(qs["exa_global"], entity_info=entity, recent_days=120, market_id="sp500")
+            if qs.get("exa_global") else []
+        )
+        naver_news, naver_ir, naver_quant_r, naver_sns_r = [], [], [], []
 
     cutoff_str = (datetime.now()-timedelta(days=90)).strftime("%Y-%m-%d")
 
@@ -644,27 +785,38 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
         if valid==0: return f"【{label}】\n최근 3개월 내 유의미한 결과 없음\n"
         return "\n".join(lines)
 
-    src_label = "Tavily + Exa + SNS + 어닝콜 + 정량근거 + 네이버(뉴스·정량·종토방)" if market_id=="kospi200" else "Tavily + Exa + SNS + 어닝콜 + 정량근거"
-    hdr = (
-        f"=== {target} [중립 수집] ({datetime.now().strftime('%Y-%m-%d')}) ===\n"
-        f"소스: {src_label}\n"
-        f"주의: 아래 자료는 방향성 유도 없이 수집된 원자료이며, 강세/중립/약세 해석은 이후 에이전트가 수행한다.\n"
-    )
-    sections = [
-        fmt(tr, "① 최근 뉴스·핵심 논점"),
-        fmt(er, "② IR·리포트·공시·장문 자료"),
-        fmt(sr, "③ SNS·커뮤니티 반응", show_p=True),
-        f"【④ 어닝콜·실적발표】\n{et}",
-        fmt_quant(qr, "⑤ 내러티브를 지지/반박하는 정량 근거"),
-        f"{fs}" if fs else "【⑥ FMP 구조화 정량 스냅샷】\n가용 데이터 없음\n",
-    ]
+    hdr = f"=== {target} [{direction}] ({datetime.now().strftime('%Y-%m-%d')}) ===\n"
+
     if market_id == "kospi200":
-        if naver_news:
-            sections.append(fmt(naver_news,    "⑦ 네이버 금융뉴스·증권사 리포트 (Naver API)"))
-        if naver_quant_r:
-            sections.append(fmt(naver_quant_r, "⑧ 네이버 재무·정량 근거 (Naver API)"))
-        if naver_sns_r:
-            sections.append(fmt(naver_sns_r,   "⑨ 네이버 종토방·커뮤니티 여론 (Naver API)"))
+        # ── KOSPI: 국내 → 네이버 API, 해외 → Tavily/Exa global ────────────
+        hdr += "소스: 네이버API(뉴스·IR·정량·종토방) + Tavily/Exa(해외시각) + 어닝콜\n"
+        sections = [
+            fmt(naver_news,    "① 국내 최신 뉴스·방향별 논점 (Naver API)"),
+            fmt(naver_ir,      "② 국내 IR·공시·증권사 리포트 (Naver API)"),
+            fmt(naver_sns_r,   "③ 종토방·커뮤니티 여론 (Naver API)", show_p=False),
+            f"【④ 어닝콜·실적발표 (네이버+Tavily)】\n{et}",
+            fmt_quant(qr,      "⑤ 재무·정량 근거 (Naver API)"),
+        ]
+        if tr_global or er_global:
+            sections.append(fmt(tr_global, "⑥ 해외 시각 — Tavily (Bloomberg·Reuters·WSJ)"))
+            sections.append(fmt(er_global, "⑦ 해외 시각 — Exa (Seeking Alpha·Barron's·FT)"))
+    else:
+        # ── 미국·일본: 기존 Tavily + Exa + global ─────────────────────────────
+        src = "Tavily + Exa + SNS + 어닝콜 + 정량근거"
+        if tr_global or er_global: src += " + 해외리포트"
+        hdr += f"소스: {src}\n"
+        sections = [
+            fmt(tr,  "① 최신 뉴스·핵심 논점"),
+            fmt(er,  "② IR·리포트·공시"),
+            fmt(sr,  "③ SNS·커뮤니티 반응", show_p=True),
+            f"【④ 어닝콜·실적발표】\n{et}",
+            fmt_quant(qr, "⑤ 정량 근거"),
+            f"{fs}" if fs else "【⑥ FMP 정량 스냅샷】\n가용 데이터 없음\n",
+        ]
+        if tr_global or er_global:
+            sections.append(fmt(tr_global, "⑦ 해외 시각 — Tavily"))
+            sections.append(fmt(er_global, "⑧ 해외 시각 — Exa"))
+
     return hdr + "\n\n".join(sections)
 
 
@@ -1238,7 +1390,7 @@ def main():
     with col_title:
         qw=get_ollama_model('kospi200'); ll=get_ollama_model('sp500'); gm=get_ollama_model('nikkei225')
         st.markdown(f"""<h1 style='background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-size:26px;margin:0'>
-        ⚡ [시장/종목] 내러티브 앤 넘버스 수집 및 분석 v2.01.00</h1>
+        ⚡ [시장/종목] 내러티브 앤 넘버스 수집 및 분석</h1>
         <p style='color:#4a5568;font-size:11px;letter-spacing:2px;margin:2px 0 0'>7-AGENT AI · 향후 3개월 판정 · 🇰🇷{qw} / 🇺🇸{ll} / 🇯🇵{gm}</p>""",unsafe_allow_html=True)
     with col_info:
         ollama_url=get_ollama_url()
