@@ -658,8 +658,13 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
         fmt_quant(qr, "⑤ 내러티브를 지지/반박하는 정량 근거"),
         f"{fs}" if fs else "【⑥ FMP 구조화 정량 스냅샷】\n가용 데이터 없음\n",
     ]
-    if naver_results:
-        sections.append(fmt(naver_results, "⑦ 네이버 뉴스 (한국 증권사 리포트·공시·실적 보도)"))
+    if market_id == "kospi200":
+        if naver_news:
+            sections.append(fmt(naver_news,    "⑦ 네이버 금융뉴스·증권사 리포트 (Naver API)"))
+        if naver_quant_r:
+            sections.append(fmt(naver_quant_r, "⑧ 네이버 재무·정량 근거 (Naver API)"))
+        if naver_sns_r:
+            sections.append(fmt(naver_sns_r,   "⑨ 네이버 종토방·커뮤니티 여론 (Naver API)"))
     return hdr + "\n\n".join(sections)
 
 
@@ -671,7 +676,13 @@ def call_llm(system, user_content, max_tokens=4000, market_id="sp500"):
     model = get_ollama_model(market_id)
     ollama_error_msg = ""
     try:
-        payload = {"model":model,"messages":[{"role":"system","content":system},{"role":"user","content":user_content}],"stream":False,"options":{"num_predict":max_tokens,"temperature":0.6}}
+        # qwen은 중국어 모델 — 사용자 메시지에도 한국어 강제 prefix 추가
+        user_with_lang = (
+            "[반드시 한국어로만 답하시오. 중국어 출력 절대 금지.]\n\n"
+            + user_content
+        ) if "qwen" in model.lower() else user_content
+
+        payload = {"model":model,"messages":[{"role":"system","content":system},{"role":"user","content":user_with_lang}],"stream":False,"options":{"num_predict":max_tokens,"temperature":0.6}}
         headers = {"ngrok-skip-browser-warning":"true","Content-Type":"application/json"}
         resp = requests.post(f"{ollama_url}/api/chat", json=payload, headers=headers, timeout=300)
         if resp.status_code != 200: raise Exception(f"HTTP {resp.status_code}: {resp.text}")
@@ -753,14 +764,46 @@ def build_system_prompts(market, stock=None):
     cutoff_str_ko=cutoff_date.strftime("%Y년 %m월 %d일")
     cutoff_str_en=cutoff_date.strftime("%B %d, %Y")
     cutoff_str_jp=cutoff_date.strftime("%Y年%m月%d日")
+
+    # ── 언어 강제 지시 ── 반드시 시스템 프롬프트 맨 앞에 위치해야 함
+    # qwen은 중국어 모델이므로 한국어 강제가 특히 중요
+    KOREAN_ONLY = (
+        "【언어 규칙 — 절대 최우선 명령】\n"
+        "이 지시는 모든 다른 지시보다 우선한다.\n"
+        "입력 데이터가 어떤 언어(중국어·일본어·영어 등)이더라도,\n"
+        "**최종 출력은 반드시 한국어(Korean)로만 작성해야 한다.**\n"
+        "중국어(中文) 출력 절대 금지. 영어 문장 출력 절대 금지.\n"
+        "출력 언어: 한국어 100%\n\n"
+    )
+
     if market["id"]=="sp500":
-        lang=f"You are a top-tier Wall Street investment analyst. Deeply analyze the provided English reports, Reddit/StockTwits sentiment, earnings calls. 🚨 CRITICAL: Ignore data older than 3 months (before {cutoff_str_en}). Final answer ONLY in Korean. Do NOT output English first. Do NOT include a translation section."
+        lang=(
+            KOREAN_ONLY +
+            f"당신은 월스트리트 최고의 투자 애널리스트입니다. "
+            f"제공된 영어 리포트·Reddit/StockTwits 여론·어닝콜을 깊이 분석하십시오. "
+            f"🚨 {cutoff_str_ko} 이전 데이터는 무시하십시오."
+        )
     elif market["id"]=="nikkei225":
-        lang=f"あなたは日本市場の専門アナリストです。提供された日本語資料を深く分析してください。🚨 3ヶ月前（{cutoff_str_jp}以前）の古いデータは絶対に無視してください。**最終出力はすべて韓国語（한국어）で**作成し、以下の韓国語見出しに従ってください。"
-    else:
-        lang=f"당신은 여의도 최고의 한국 시장 전문 애널리스트입니다. 주어진 한국어 뉴스, 네이버 뉴스, 종토방 여론, 실적발표 자료를 바탕으로 깊이 있게 분석하십시오. 🚨 절대 규칙: 3개월 전({cutoff_str_ko}) 기준 과거 데이터는 절대 무시하고 오직 최신 정보만 인용하십시오. **모든 출력은 한국어**로 작성하십시오."
+        lang=(
+            KOREAN_ONLY +
+            f"당신은 일본 시장 전문 애널리스트입니다. "
+            f"제공된 일본어 자료를 깊이 분석하되, 출력은 반드시 한국어로 하십시오. "
+            f"🚨 {cutoff_str_ko} 이전 데이터는 무시하십시오."
+        )
+    else:  # kospi200 — qwen2.5 사용, 한국어 강제 필수
+        lang=(
+            KOREAN_ONLY +
+            f"당신은 여의도 최고의 한국 시장 전문 애널리스트입니다. "
+            f"주어진 한국어 뉴스·네이버 뉴스·종토방 여론·실적발표 자료를 깊이 분석하십시오. "
+            f"🚨 {cutoff_str_ko} 이전 데이터는 절대 무시하고 최신 정보만 인용하십시오."
+        )
+
     warn=f"\n⚠️ 절대 금지: 검색 결과에 없는 수치 조작 금지. {cutoff_str_ko} 이전 데이터 배제."
-    c_warn="Output only one final Korean version. Do not include English source. Do not add '번역' sections."
+    c_warn=(
+        "【언어 규칙 재확인】 출력 언어: 한국어 100%. "
+        "중국어·영어·일본어 출력 절대 금지. "
+        "Output ONLY in Korean (한국어). 中文输出绝对禁止."
+    )
 
     return {
 
@@ -794,7 +837,8 @@ def build_system_prompts(market, stock=None):
 ### ⑧ 정량 정합성 [1-10]: 스토리가 숫자로 뒷받침되는가
 ### ⑨ 강세 내러티브 3줄 요약
 
-출처(기관명, 날짜, URL) 명시.{warn}""",
+출처(기관명, 날짜, URL) 명시.{warn}
+🚨 반드시 한국어로만 출력할 것.""",
 
 
 "neutral": f"""{lang}
@@ -825,7 +869,8 @@ def build_system_prompts(market, stock=None):
 ### ⑦ 중립 내러티브 강도 [1-10] / ⑧ 정량 정합성 [1-10]
 ### ⑨ 중립 내러티브 3줄 요약
 
-출처 명시.{warn}""",
+출처 명시.{warn}
+🚨 반드시 한국어로만 출력할 것.""",
 
 
 "bear": f"""{lang}
@@ -855,11 +900,14 @@ def build_system_prompts(market, stock=None):
 ### ⑦ 약세 내러티브 강도 [1-10] / ⑧ 정량 정합성 [1-10]
 ### ⑨ 약세 내러티브 3줄 요약
 
-출처 명시.{warn}""",
+출처 명시.{warn}
+🚨 반드시 한국어로만 출력할 것.""",
 
 
 "judge": f"""{lang}
 {c_warn}
+
+⚠️ 절대 명령: 아래 내용을 어떤 언어로 받더라도 반드시 **한국어**로만 출력하시오.
 
 ## 수석 내러티브 판정관
 
@@ -1190,7 +1238,7 @@ def main():
     with col_title:
         qw=get_ollama_model('kospi200'); ll=get_ollama_model('sp500'); gm=get_ollama_model('nikkei225')
         st.markdown(f"""<h1 style='background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-size:26px;margin:0'>
-        ⚡ [시장/종목] 내러티브 앤 넘버스 수집 및 분석 v2.00.00</h1>
+        ⚡ [시장/종목] 내러티브 앤 넘버스 수집 및 분석 v2.01.00</h1>
         <p style='color:#4a5568;font-size:11px;letter-spacing:2px;margin:2px 0 0'>7-AGENT AI · 향후 3개월 판정 · 🇰🇷{qw} / 🇺🇸{ll} / 🇯🇵{gm}</p>""",unsafe_allow_html=True)
     with col_info:
         ollama_url=get_ollama_url()
