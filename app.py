@@ -1405,71 +1405,98 @@ def display_leaderboard():
     rows=load_leaderboard()
     done_rows=[r for r in rows if r.get("status")!="running"]
     running_rows=[r for r in rows if r.get("status")=="running"]
+
     st.markdown("### 📊 분석 현황")
-    c1,c2,c3=st.columns(3)
-    c1.metric("완료된 분석",f"{len(done_rows)}개"); c2.metric("진행 중",f"{len(running_rows)}개"); c3.metric("전체 캐시",f"{len(rows)}개")
-    if not rows: st.caption("아직 분석 없음."); return
+    m1,m2,m3 = st.columns(3)
+    m1.metric("완료된 분석",f"{len(done_rows)}개")
+    m2.metric("진행 중",f"{len(running_rows)}개")
+    m3.metric("전체 캐시",f"{len(rows)}개")
 
-    with st.expander("랭킹 보기 / 접기", expanded=False):
-        st.markdown("#### 추천 강도 랭킹 (48시간 내 · 강세 확률 높은 순)")
-        st.caption("💡 기업명 버튼을 클릭하면 분석 결과를 바로 확인할 수 있습니다.")
-        mf={"kospi200":"🇰🇷","sp500":"🇺🇸","nikkei225":"🇯🇵"}
+    if not rows:
+        st.caption("아직 분석 없음.")
+        return None
 
-        # 헤더
-        h1,h2,h3,h4,h5,h6=st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
-        for h,t in zip([h1,h2,h3,h4,h5,h6],["순위","시장","종목/지수","판정","확률 분포","분석"]):
-            h.markdown(f"<span style='color:#4a5568;font-size:11px'>{t}</span>",unsafe_allow_html=True)
-        st.markdown("<hr style='margin:4px 0;border-color:#e2e6ef'>",unsafe_allow_html=True)
+    # ── 접기/펼치기 토글 버튼 (session_state 직접 제어) ───────────────────────
+    lb_open = st.session_state.get("lb_open", True)
+    toggle_label = "▲ 랭킹 접기" if lb_open else "▼ 랭킹 펼치기"
+    if st.button(toggle_label, key="lb_toggle"):
+        st.session_state["lb_open"] = not lb_open
+        st.rerun()
 
-        selected_id = st.session_state.get("lb_selected_id")
+    if not lb_open:
+        return st.session_state.get("lb_selected_id")
 
-        for rank,row in enumerate(rows,1):
-            tid  = row.get("target_id","")
-            bp   = row.get("bull_prob") or 0
-            np_  = row.get("neutral_prob") or 0
-            rp   = row.get("bear_prob") or 0
-            w    = row.get("winner","")
-            flag = mf.get(row.get("market_id",""),"")
-            is_running = row.get("status")=="running"
-            rc   = "#00e87a" if bp>=55 else "#f5c518" if bp>=45 else "#ff3c4e"
-            is_selected = (selected_id == tid)
+    # ── 랭킹 테이블 ───────────────────────────────────────────────────────────
+    st.caption("💡 기업명을 클릭하면 분석 결과가 아래에 표시됩니다.")
+    mf = {"kospi200":"🇰🇷","sp500":"🇺🇸","nikkei225":"🇯🇵"}
 
-            c1,c2,c3,c4,c5,c6 = st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
+    h1,h2,h3,h4,h5,h6 = st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
+    for h,t in zip([h1,h2,h3,h4,h5,h6],["순위","시장","종목/지수","판정","확률 분포","분석"]):
+        h.markdown(f"<span style='color:#4a5568;font-size:11px'>{t}</span>",unsafe_allow_html=True)
+    st.markdown("<hr style='margin:4px 0;border-color:#e2e6ef'>",unsafe_allow_html=True)
 
-            c1.markdown(f"<div style='color:{rc};font-weight:900;font-size:14px;padding-top:8px'>#{rank}</div>",unsafe_allow_html=True)
-            c2.markdown(f"<div style='font-size:18px;padding-top:6px'>{flag}</div>",unsafe_allow_html=True)
+    selected_id = st.session_state.get("lb_selected_id")
 
-            # 종목명: 클릭 가능한 버튼 (완료된 것만)
-            if not is_running and row.get("results"):
-                btn_label = f"{'▶ ' if is_selected else ''}{row['target_label']}"
-                btn_type  = "primary" if is_selected else "secondary"
-                if c3.button(btn_label, key=f"lb_btn_{tid}", use_container_width=True, type=btn_type):
-                    if selected_id == tid:
-                        # 이미 선택된 항목 클릭 → 닫기
-                        st.session_state.pop("lb_selected_id", None)
-                    else:
-                        st.session_state["lb_selected_id"] = tid
-                    st.rerun()
-            else:
-                c3.markdown(f"<div style='color:#4a5568;font-size:13px;padding-top:8px'>{row['target_label']}</div>",unsafe_allow_html=True)
+    for rank,row in enumerate(rows,1):
+        tid        = row.get("target_id","")
+        bp         = row.get("bull_prob") or 0
+        np_        = row.get("neutral_prob") or 0
+        rp         = row.get("bear_prob") or 0
+        w          = row.get("winner","")
+        flag       = mf.get(row.get("market_id",""),"")
+        is_running = row.get("status") == "running"
+        is_selected= (selected_id == tid)
+        rc         = "#00e87a" if bp>=55 else "#f5c518" if bp>=45 else "#ff3c4e"
 
-            if is_running:
-                c4.markdown("🔄 분석중")
-                c5.markdown("<div style='color:#6b7a9e;font-size:11px;padding-top:8px'>진행 중...</div>",unsafe_allow_html=True)
-            else:
-                c4.markdown(winner_badge(w))
-                bar=f"""<div style='display:flex;gap:2px;align-items:center;margin-top:6px'>
-                <div style='width:{bp}%;height:8px;background:#00e87a;border-radius:2px 0 0 2px'></div>
-                <div style='width:{np_}%;height:8px;background:#f5c518'></div>
-                <div style='width:{rp}%;height:8px;background:#ff3c4e;border-radius:0 2px 2px 0'></div></div>
-                <div style='display:flex;gap:8px;font-size:9px;color:#6b7a9e;margin-top:2px'>
-                <span style='color:#00e87a'>↑{bp}%</span><span style='color:#f5c518'>→{np_}%</span><span style='color:#ff3c4e'>↓{rp}%</span></div>"""
-                c5.markdown(bar,unsafe_allow_html=True)
+        c1,c2,c3,c4,c5,c6 = st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
 
-            c6.markdown(f"<div style='color:#374151;font-size:10px;padding-top:8px'>{'진행중' if is_running else age_label(row['age_hours'])}</div>",unsafe_allow_html=True)
-            st.markdown("<hr style='margin:2px 0;border-color:#f0f0f0'>",unsafe_allow_html=True)
+        c1.markdown(
+            f"<div style='color:{rc};font-weight:900;font-size:14px;padding-top:8px'>#{rank}</div>",
+            unsafe_allow_html=True)
+        c2.markdown(
+            f"<div style='font-size:18px;padding-top:6px'>{flag}</div>",
+            unsafe_allow_html=True)
 
-    # 선택된 target_id를 반환 → main()에서 랭킹 아래에 결과 표시
+        # 종목명 버튼 — expander 밖이므로 정상 작동
+        if not is_running and row.get("results"):
+            btn_label = f"▶ {row['target_label']}" if is_selected else row['target_label']
+            if c3.button(btn_label, key=f"lb_{tid}", use_container_width=True,
+                         type="primary" if is_selected else "secondary"):
+                if is_selected:
+                    st.session_state.pop("lb_selected_id", None)
+                else:
+                    st.session_state["lb_selected_id"] = tid
+                st.rerun()
+        else:
+            c3.markdown(
+                f"<div style='color:#4a5568;font-size:13px;padding-top:8px'>{row['target_label']}</div>",
+                unsafe_allow_html=True)
+
+        if is_running:
+            c4.markdown("🔄 분석중")
+            c5.markdown(
+                "<div style='color:#6b7a9e;font-size:11px;padding-top:8px'>진행 중...</div>",
+                unsafe_allow_html=True)
+        else:
+            c4.markdown(winner_badge(w))
+            bar = (
+                f"<div style='display:flex;gap:2px;align-items:center;margin-top:6px'>"
+                f"<div style='width:{bp}%;height:8px;background:#00e87a;border-radius:2px 0 0 2px'></div>"
+                f"<div style='width:{np_}%;height:8px;background:#f5c518'></div>"
+                f"<div style='width:{rp}%;height:8px;background:#ff3c4e;border-radius:0 2px 2px 0'></div></div>"
+                f"<div style='display:flex;gap:8px;font-size:9px;color:#6b7a9e;margin-top:2px'>"
+                f"<span style='color:#00e87a'>↑{bp}%</span>"
+                f"<span style='color:#f5c518'>→{np_}%</span>"
+                f"<span style='color:#ff3c4e'>↓{rp}%</span></div>"
+            )
+            c5.markdown(bar, unsafe_allow_html=True)
+
+        c6.markdown(
+            f"<div style='color:#374151;font-size:10px;padding-top:8px'>"
+            f"{'진행중' if is_running else age_label(row['age_hours'])}</div>",
+            unsafe_allow_html=True)
+        st.markdown("<hr style='margin:2px 0;border-color:#f0f0f0'>",unsafe_allow_html=True)
+
     return st.session_state.get("lb_selected_id")
 
 
