@@ -1457,8 +1457,8 @@ def display_leaderboard():
             f"<div style='font-size:18px;padding-top:6px'>{flag}</div>",
             unsafe_allow_html=True)
 
-        # 종목명 버튼 — expander 밖이므로 정상 작동
-        if not is_running and row.get("results"):
+        # 종목명 버튼 — winner가 있으면(=분석 완료) 버튼으로 표시
+        if not is_running and row.get("winner"):
             btn_label = f"▶ {row['target_label']}" if is_selected else row['target_label']
             if c3.button(btn_label, key=f"lb_{tid}", use_container_width=True,
                          type="primary" if is_selected else "secondary"):
