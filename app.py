@@ -1469,27 +1469,8 @@ def display_leaderboard():
             c6.markdown(f"<div style='color:#374151;font-size:10px;padding-top:8px'>{'진행중' if is_running else age_label(row['age_hours'])}</div>",unsafe_allow_html=True)
             st.markdown("<hr style='margin:2px 0;border-color:#f0f0f0'>",unsafe_allow_html=True)
 
-            # ── 선택된 항목이면 바로 아래에 결과 인라인 표시 ────────────────
-            if is_selected and not is_running:
-                cached = cache_get(tid)
-                if cached and cached.get("results"):
-                    st.markdown(f"""
-                    <div style='background:#f0f7ff;border:1.5px solid #4a7cf7;border-radius:10px;
-                    padding:16px;margin:8px 0 16px 0'>
-                    <div style='color:#2d3a5e;font-size:13px;font-weight:700;margin-bottom:8px'>
-                    📊 {row['target_label']} — 분석 결과
-                    <span style='font-size:11px;font-weight:400;color:#6b7a9e;margin-left:8px'>
-                    (아래 결과는 랭킹 내 인라인 뷰입니다)</span></div></div>
-                    """, unsafe_allow_html=True)
-                    bp_c  = cached.get("bull_prob") or 50
-                    np_c  = cached.get("neutral_prob") or 30
-                    rp_c  = cached.get("bear_prob") or 20
-                    display_results(
-                        cached["results"],
-                        winner_from_probs(bp_c, np_c, rp_c),
-                        cached.get("analyzed_at"),
-                    )
-                    st.markdown("---")
+    # 선택된 target_id를 반환 → main()에서 랭킹 아래에 결과 표시
+    return st.session_state.get("lb_selected_id")
 
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
@@ -1505,7 +1486,30 @@ def main():
         st.markdown(f"<div style='color:#374151;font-size:10px;text-align:right;margin-top:8px'>🖥 {ollama_url[:30]}...</div>",unsafe_allow_html=True)
         if st.button("새로고침",use_container_width=True): st.session_state.clear(); st.rerun()
     st.markdown("---")
-    display_leaderboard()
+    lb_selected = display_leaderboard()
+
+    # ── 랭킹에서 선택된 종목 결과를 랭킹 바로 아래에 표시 ────────────────────
+    if lb_selected:
+        lb_cached = cache_get(lb_selected)
+        if lb_cached and lb_cached.get("results") and lb_cached.get("status") != "running":
+            bp_l  = lb_cached.get("bull_prob") or 50
+            np_l  = lb_cached.get("neutral_prob") or 30
+            rp_l  = lb_cached.get("bear_prob") or 20
+            label_l = lb_cached.get("target_label", lb_selected)
+            st.markdown(f"""
+            <div style='background:#f0f7ff;border:2px solid #4a7cf7;border-radius:12px;
+            padding:12px 18px;margin:8px 0'>
+            <span style='color:#2d3a5e;font-size:14px;font-weight:700'>
+            📊 {label_l} 분석 결과</span>
+            <span style='color:#6b7a9e;font-size:11px;margin-left:10px'>
+            (랭킹에서 선택됨 · 다른 기업 클릭 시 교체)</span>
+            </div>""", unsafe_allow_html=True)
+            display_results(
+                lb_cached["results"],
+                winner_from_probs(bp_l, np_l, rp_l),
+                lb_cached.get("analyzed_at"),
+            )
+
     st.markdown("---")
     st.markdown("### STEP 1 · 시장 선택")
     mc=st.radio("",list(MARKETS.keys()),horizontal=True,label_visibility="collapsed")
