@@ -37,7 +37,7 @@ CACHE_TTL_HOURS = 48
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_MODELS = {
-    "kospi200":  "qwen2.5:32b",
+    "kospi200":  "gemma3:27b",   # gemma는 한국어 지시 준수율 높음 (qwen은 중국어 혼입 위험)
     "sp500":     "gemma3:27b",
     "nikkei225": "gemma3:27b",
 }
@@ -901,9 +901,46 @@ def load_leaderboard():
         return rows
     except: return []
 
-def strip_duplicate_translation(text):
+def _has_chinese(text: str) -> bool:
+    """중국어(한자) 문자 비율이 3% 이상이면 True"""
+    if not text: return False
+    chinese = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    return chinese / max(len(text), 1) > 0.03
+
+def _force_korean(text: str, market_id: str = "sp500") -> str:
+    """
+    중국어가 섞인 출력을 감지하면 LLM에 한국어 번역을 재요청.
+    재번역 비용(토큰)은 작지만 품질 보장을 위해 필요.
+    """
+    if not _has_chinese(text):
+        return text
+    print(f"[중국어 감지] 한국어 번역 재호출 중... ({len(text)}자)")
+    try:
+        translate_prompt = (
+            "아래 텍스트에 중국어가 포함되어 있습니다. "
+            "모든 중국어 문장을 한국어로 번역하되, "
+            "이미 한국어인 부분은 그대로 유지하십시오. "
+            "형식(마크다운, 번호, 섹션 헤더)은 그대로 보존하십시오.\n\n"
+            f"{text}"
+        )
+        translated = call_llm(
+            "당신은 중국어→한국어 번역 전문가입니다. 출력은 반드시 한국어로만 작성하십시오.",
+            translate_prompt,
+            max_tokens=len(text) // 2 + 1000,  # 원문 길이 기반 토큰 추정
+            market_id=market_id,
+        )
+        return translated if translated and not translated.startswith("⚠️") else text
+    except Exception as e:
+        print(f"[번역 재호출 실패]: {e}")
+        return text
+
+def strip_duplicate_translation(text: str, market_id: str = "sp500") -> str:
+    """번역 섹션 중복 제거 + 중국어 자동 번역"""
     for m in ["번역 (한국어):","번역:","Translation:","Translated version:"]:
-        if m in text: return text.split(m)[-1].strip()
+        if m in text:
+            text = text.split(m)[-1].strip()
+    # 중국어 감지 시 자동 번역
+    text = _force_korean(text, market_id)
     return text.strip()
 
 
@@ -1120,7 +1157,19 @@ def build_system_prompts(market, stock=None):
 **약세장 (유의미한 하락): XX%**
 
 ### 내러티브 실현 트리거 (상위 3개)
-[트리거 이벤트 / 예상 시점 / 집단 믿음에 미치는 영향]""",
+아래 형식을 반드시 준수하시오:
+
+**트리거 1: [이벤트명]**
+- 예상 시점: [시점]
+- 집단 믿음에 미치는 영향: [영향]
+
+**트리거 2: [이벤트명]**
+- 예상 시점: [시점]
+- 집단 믿음에 미치는 영향: [영향]
+
+**트리거 3: [이벤트명]**
+- 예상 시점: [시점]
+- 집단 믿음에 미치는 영향: [영향]""",
     }
 
 
@@ -1275,7 +1324,8 @@ def _run_analysis_core(target_id, target_label, market, stock, prompts):
                 f"핵심: ④항 'Not Yet Priced-In'에 집중하십시오 — 이것이 향후 주가를 움직입니다."
             )
             results[agent] = strip_duplicate_translation(
-                call_llm(prompts[agent], uc, market_id=market["id"])
+                call_llm(prompts[agent], uc, market_id=market["id"]),
+                market_id=market["id"],
             )
         except Exception as e:
             results[agent] = f"⚠️ 오류: {e}"
@@ -1298,7 +1348,8 @@ def _run_analysis_core(target_id, target_label, market, stock, prompts):
             f"판단의 핵심: 어느 방향의 'Not Yet Priced-In' 내러티브가 가장 설득력 있고 실현 가능성이 높은가?"
         )
         results["judge"] = strip_duplicate_translation(
-            call_llm(prompts["judge"], judge_input, max_tokens=8000, market_id=market["id"])
+            call_llm(prompts["judge"], judge_input, max_tokens=8000, market_id=market["id"]),
+            market_id=market["id"],
         )
     except Exception as e:
         results["judge"] = f"⚠️ 오류: {e}"
@@ -1358,30 +1409,87 @@ def display_leaderboard():
     c1,c2,c3=st.columns(3)
     c1.metric("완료된 분석",f"{len(done_rows)}개"); c2.metric("진행 중",f"{len(running_rows)}개"); c3.metric("전체 캐시",f"{len(rows)}개")
     if not rows: st.caption("아직 분석 없음."); return
-    with st.expander("랭킹 보기 / 접기",expanded=False):
+
+    with st.expander("랭킹 보기 / 접기", expanded=False):
         st.markdown("#### 추천 강도 랭킹 (48시간 내 · 강세 확률 높은 순)")
+        st.caption("💡 기업명 버튼을 클릭하면 분석 결과를 바로 확인할 수 있습니다.")
         mf={"kospi200":"🇰🇷","sp500":"🇺🇸","nikkei225":"🇯🇵"}
+
+        # 헤더
         h1,h2,h3,h4,h5,h6=st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
         for h,t in zip([h1,h2,h3,h4,h5,h6],["순위","시장","종목/지수","판정","확률 분포","분석"]):
             h.markdown(f"<span style='color:#4a5568;font-size:11px'>{t}</span>",unsafe_allow_html=True)
         st.markdown("<hr style='margin:4px 0;border-color:#e2e6ef'>",unsafe_allow_html=True)
+
+        selected_id = st.session_state.get("lb_selected_id")
+
         for rank,row in enumerate(rows,1):
-            bp=row.get("bull_prob") or 0; np_=row.get("neutral_prob") or 0; rp=row.get("bear_prob") or 0
-            w=row.get("winner",""); flag=mf.get(row.get("market_id",""),""); is_running=row.get("status")=="running"
-            rc="#00e87a" if bp>=55 else "#f5c518" if bp>=45 else "#ff3c4e"
-            c1,c2,c3,c4,c5,c6=st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
-            c1.markdown(f"<div style='color:{rc};font-weight:900;font-size:14px;padding-top:4px'>#{rank}</div>",unsafe_allow_html=True)
-            c2.markdown(f"<div style='font-size:18px;padding-top:2px'>{flag}</div>",unsafe_allow_html=True)
-            c3.markdown(f"<div style='color:#4a5568;font-size:13px;padding-top:4px'>{row['target_label']}</div>",unsafe_allow_html=True)
+            tid  = row.get("target_id","")
+            bp   = row.get("bull_prob") or 0
+            np_  = row.get("neutral_prob") or 0
+            rp   = row.get("bear_prob") or 0
+            w    = row.get("winner","")
+            flag = mf.get(row.get("market_id",""),"")
+            is_running = row.get("status")=="running"
+            rc   = "#00e87a" if bp>=55 else "#f5c518" if bp>=45 else "#ff3c4e"
+            is_selected = (selected_id == tid)
+
+            c1,c2,c3,c4,c5,c6 = st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
+
+            c1.markdown(f"<div style='color:{rc};font-weight:900;font-size:14px;padding-top:8px'>#{rank}</div>",unsafe_allow_html=True)
+            c2.markdown(f"<div style='font-size:18px;padding-top:6px'>{flag}</div>",unsafe_allow_html=True)
+
+            # 종목명: 클릭 가능한 버튼 (완료된 것만)
+            if not is_running and row.get("results"):
+                btn_label = f"{'▶ ' if is_selected else ''}{row['target_label']}"
+                btn_type  = "primary" if is_selected else "secondary"
+                if c3.button(btn_label, key=f"lb_btn_{tid}", use_container_width=True, type=btn_type):
+                    if selected_id == tid:
+                        # 이미 선택된 항목 클릭 → 닫기
+                        st.session_state.pop("lb_selected_id", None)
+                    else:
+                        st.session_state["lb_selected_id"] = tid
+                    st.rerun()
+            else:
+                c3.markdown(f"<div style='color:#4a5568;font-size:13px;padding-top:8px'>{row['target_label']}</div>",unsafe_allow_html=True)
+
             if is_running:
                 c4.markdown("🔄 분석중")
-                c5.markdown("<div style='color:#6b7a9e;font-size:11px;padding-top:6px'>진행 중...</div>",unsafe_allow_html=True)
+                c5.markdown("<div style='color:#6b7a9e;font-size:11px;padding-top:8px'>진행 중...</div>",unsafe_allow_html=True)
             else:
                 c4.markdown(winner_badge(w))
-                bar=f"""<div style='display:flex;gap:2px;align-items:center;margin-top:6px'><div style='width:{bp}%;height:8px;background:#00e87a;border-radius:2px 0 0 2px'></div><div style='width:{np_}%;height:8px;background:#f5c518'></div><div style='width:{rp}%;height:8px;background:#ff3c4e;border-radius:0 2px 2px 0'></div></div><div style='display:flex;gap:8px;font-size:9px;color:#6b7a9e;margin-top:2px'><span style='color:#00e87a'>↑{bp}%</span><span style='color:#f5c518'>→{np_}%</span><span style='color:#ff3c4e'>↓{rp}%</span></div>"""
+                bar=f"""<div style='display:flex;gap:2px;align-items:center;margin-top:6px'>
+                <div style='width:{bp}%;height:8px;background:#00e87a;border-radius:2px 0 0 2px'></div>
+                <div style='width:{np_}%;height:8px;background:#f5c518'></div>
+                <div style='width:{rp}%;height:8px;background:#ff3c4e;border-radius:0 2px 2px 0'></div></div>
+                <div style='display:flex;gap:8px;font-size:9px;color:#6b7a9e;margin-top:2px'>
+                <span style='color:#00e87a'>↑{bp}%</span><span style='color:#f5c518'>→{np_}%</span><span style='color:#ff3c4e'>↓{rp}%</span></div>"""
                 c5.markdown(bar,unsafe_allow_html=True)
-            c6.markdown(f"<div style='color:#374151;font-size:10px;padding-top:6px'>{'진행중' if is_running else age_label(row['age_hours'])}</div>",unsafe_allow_html=True)
+
+            c6.markdown(f"<div style='color:#374151;font-size:10px;padding-top:8px'>{'진행중' if is_running else age_label(row['age_hours'])}</div>",unsafe_allow_html=True)
             st.markdown("<hr style='margin:2px 0;border-color:#f0f0f0'>",unsafe_allow_html=True)
+
+            # ── 선택된 항목이면 바로 아래에 결과 인라인 표시 ────────────────
+            if is_selected and not is_running:
+                cached = cache_get(tid)
+                if cached and cached.get("results"):
+                    st.markdown(f"""
+                    <div style='background:#f0f7ff;border:1.5px solid #4a7cf7;border-radius:10px;
+                    padding:16px;margin:8px 0 16px 0'>
+                    <div style='color:#2d3a5e;font-size:13px;font-weight:700;margin-bottom:8px'>
+                    📊 {row['target_label']} — 분석 결과
+                    <span style='font-size:11px;font-weight:400;color:#6b7a9e;margin-left:8px'>
+                    (아래 결과는 랭킹 내 인라인 뷰입니다)</span></div></div>
+                    """, unsafe_allow_html=True)
+                    bp_c  = cached.get("bull_prob") or 50
+                    np_c  = cached.get("neutral_prob") or 30
+                    rp_c  = cached.get("bear_prob") or 20
+                    display_results(
+                        cached["results"],
+                        winner_from_probs(bp_c, np_c, rp_c),
+                        cached.get("analyzed_at"),
+                    )
+                    st.markdown("---")
 
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
