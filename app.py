@@ -33,7 +33,7 @@ section[data-testid="stSidebar"] { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
-CACHE_TTL_HOURS = 48
+CACHE_TTL_HOURS = 720  # 30일 (24 * 30)
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_MODELS = {
@@ -1200,9 +1200,18 @@ def extract_probs(text):
 def winner_badge(w): return {"bull":"📈 강세","neutral":"➡️ 중립","bear":"📉 약세"}.get(w,"❓")
 
 def age_label(hours):
-    if hours<1: return "방금"
-    if hours<24: return f"{int(hours)}시간 전"
-    return f"{int(hours/24)}일 전"
+    if hours < 1:    return "방금"
+    if hours < 2:    return "1시간 전"
+    if hours < 24:   return f"{int(hours)}시간 전"
+    days = int(hours / 24)
+    if days == 1:    return "1일 전"
+    if days < 7:     return f"{days}일 전"
+    weeks = days // 7
+    rem   = days % 7
+    if weeks == 1 and rem == 0: return "1주일 전"
+    if weeks == 1:              return f"1주 {rem}일 전"
+    if rem == 0:                return f"{weeks}주일 전"
+    return f"{weeks}주 {rem}일 전"
 
 
 # ─── 주가 컨텍스트 수집 (분류 정확도 향상) ───────────────────────────────────
@@ -1369,9 +1378,11 @@ def _run_analysis_core(target_id, target_label, market, stock, prompts):
 # ─── DISPLAY ──────────────────────────────────────────────────────────────────
 def display_results(results, winner, cached_at=None):
     if cached_at:
-        at=datetime.fromisoformat(cached_at.replace("Z","")).replace(tzinfo=timezone.utc)
-        age_h=(datetime.now(timezone.utc)-at).total_seconds()/3600
-        st.info(f"🗄 캐시 결과 · {at.strftime('%Y-%m-%d %H:%M')} UTC · {CACHE_TTL_HOURS-age_h:.0f}시간 후 만료")
+        at = datetime.fromisoformat(cached_at.replace("Z","")).replace(tzinfo=timezone.utc)
+        age_h = (datetime.now(timezone.utc)-at).total_seconds()/3600
+        remaining_h = CACHE_TTL_HOURS - age_h
+        remain_str = f"{int(remaining_h/24)}일 후 만료" if remaining_h > 48 else f"{int(remaining_h)}시간 후 만료"
+        st.info(f"🗄 캐시 결과 · 분석일시: {at.strftime('%Y-%m-%d %H:%M')} UTC · {age_label(age_h)} 분석 · {remain_str}")
     w_map={"bull":("📈 강세","#00e87a"),"neutral":("➡️ 중립","#f5c518"),"bear":("📉 약세","#ff3c4e")}
     w_label,w_color=w_map.get(winner,("❓","#888"))
     st.markdown(f"""<div style='text-align:center;padding:16px;background:linear-gradient(135deg,{w_color}18,transparent);border:2px solid {w_color}66;border-radius:10px;margin:12px 0'>
@@ -1579,8 +1590,9 @@ def main():
                 st.rerun()
             at=datetime.fromisoformat(cached["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
             age_h=(datetime.now(timezone.utc)-at).total_seconds()/3600; remaining=CACHE_TTL_HOURS-age_h
+            remain_label = f"{int(remaining/24)}일 후 만료" if remaining > 48 else f"{int(remaining)}시간 후 만료"
             with col_a:
-                if st.button(f"🗄 캐시 불러오기 ({remaining:.0f}시간 남음, 0 토큰)",type="primary",use_container_width=True):
+                if st.button(f"🗄 캐시 불러오기 ({age_label(age_h)} 분석 · {remain_label})",type="primary",use_container_width=True):
                     bp=cached.get("bull_prob") or 50; np_=cached.get("neutral_prob") or 30; rp=cached.get("bear_prob") or 20
                     st.session_state.update({"res_results":cached["results"],"res_winner":winner_from_probs(bp,np_,rp),"res_cached_at":cached["analyzed_at"],"show_results":True,"loaded_target_id":target_id})
                     st.rerun()
