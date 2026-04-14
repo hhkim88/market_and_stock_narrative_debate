@@ -1677,8 +1677,21 @@ def display_leaderboard():
             f"<div style='font-size:18px;padding-top:6px'>{flag}</div>",
             unsafe_allow_html=True)
 
-        # 종목명 버튼 — winner가 있으면(=분석 완료) 버튼으로 표시
-        if not is_running and row.get("winner"):
+        # 종목명 — running이면 삭제 버튼, 완료면 결과 보기 버튼
+        if is_running:
+            # running 상태: 이름 텍스트 + 삭제 버튼
+            c3.markdown(
+                f"<div style='color:#4a5568;font-size:13px;padding-top:8px'>{row['target_label']}</div>",
+                unsafe_allow_html=True)
+            if c4.button("🗑 초기화", key=f"del_{tid}", use_container_width=True):
+                cache_delete(tid)
+                st.rerun()
+            c5.markdown(
+                "<div style='color:#6b7a9e;font-size:11px;padding-top:8px'>진행 중...</div>",
+                unsafe_allow_html=True)
+            c6.markdown(""); c7.markdown("진행중")
+        elif row.get("winner"):
+            # 완료 상태: 종목명 클릭 버튼
             btn_label = f"▶ {row['target_label']}" if is_selected else row['target_label']
             if c3.button(btn_label, key=f"lb_{tid}", use_container_width=True,
                          type="primary" if is_selected else "secondary"):
@@ -1687,18 +1700,6 @@ def display_leaderboard():
                 else:
                     st.session_state["lb_selected_id"] = tid
                 st.rerun()
-        else:
-            c3.markdown(
-                f"<div style='color:#4a5568;font-size:13px;padding-top:8px'>{row['target_label']}</div>",
-                unsafe_allow_html=True)
-
-        if is_running:
-            c4.markdown("🔄 분석중")
-            c5.markdown(
-                "<div style='color:#6b7a9e;font-size:11px;padding-top:8px'>진행 중...</div>",
-                unsafe_allow_html=True)
-            c6.markdown("")
-        else:
             c4.markdown(winner_badge(w))
             bar = (
                 f"<div style='display:flex;gap:2px;align-items:center;margin-top:6px'>"
@@ -1731,10 +1732,11 @@ def display_leaderboard():
                     "<div style='color:#d0d5e0;font-size:11px;padding-top:8px'>—</div>",
                     unsafe_allow_html=True)
 
-        c7.markdown(
-            f"<div style='color:#374151;font-size:10px;padding-top:8px'>"
-            f"{'진행중' if is_running else age_label(row['age_hours'])}</div>",
-            unsafe_allow_html=True)
+        if not is_running:
+            c7.markdown(
+                f"<div style='color:#374151;font-size:10px;padding-top:8px'>"
+                f"{age_label(row['age_hours'])}</div>",
+                unsafe_allow_html=True)
         st.markdown("<hr style='margin:2px 0;border-color:#f0f0f0'>",unsafe_allow_html=True)
 
     return st.session_state.get("lb_selected_id")
@@ -1805,12 +1807,19 @@ def main():
             elapsed=int((datetime.now(timezone.utc)-at).total_seconds()/60)
             pct=float(cached.get("progress") or 0.0); msg=cached.get("status_msg") or "분석 준비 중..."
             st.info(f"⏳ **{target_label}** 백그라운드 분석 중 ({elapsed}분 경과) — 브라우저 꺼도 계속 진행됩니다")
-            st.progress(pct,text=msg)
-            cr,cc=st.columns([1,1])
+            st.progress(pct, text=msg)
+            cr, cc = st.columns([1, 1])
             with cr:
-                if st.button("🔄 새로고침",use_container_width=True): st.rerun()
+                if st.button("🔄 새로고침", use_container_width=True):
+                    st.rerun()
             with cc:
-                if elapsed>30 and st.button("⚠️ 재시작",use_container_width=True): cache_delete(target_id); st.rerun()
+                # 5분 이상이면 언제든 재시작 가능 (30분 조건 제거)
+                if elapsed >= 5 and st.button("⚠️ 멈춤 — 재시작", use_container_width=True, type="secondary"):
+                    cache_delete(target_id)
+                    st.success(f"{target_label} 초기화 완료. 다시 분석 시작하세요.")
+                    st.rerun()
+                elif elapsed < 5:
+                    st.caption(f"⏱ {5 - elapsed}분 후 재시작 버튼 활성화")
             import time; time.sleep(3); st.rerun()
         else:
             if cached.get("results") and st.session_state.get("loaded_target_id")!=target_id:
