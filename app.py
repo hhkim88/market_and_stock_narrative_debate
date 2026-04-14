@@ -1559,11 +1559,20 @@ border:2px solid {w_color};border-radius:16px;padding:22px 28px;margin:4px 0 20p
             cols_t = st.columns(len(valid_blocks))
             icons = ["🔵","🟡","🔴"]
             for i, (col_t, block) in enumerate(zip(cols_t, valid_blocks)):
+                # 타이틀: 첫 ** 이전 텍스트 (트리거명)
                 title = block.split("**")[0].strip().rstrip("*").strip()
-                시점_m = re.search("예상 시점[^\n*]{0,3}([^\n*-]+)", block)
-                시점   = 시점_m.group(1).strip() if 시점_m else ""
-                영향_m = re.search("집단 믿음에 미치는 영향[^\n*]{0,3}([^\n*-]+)", block)
-                영향   = 영향_m.group(1).strip()[:90] if 영향_m else ""
+                if not title:
+                    # fallback: 첫 줄
+                    title = block.split("\n")[0].strip().lstrip("*").strip()
+
+                # 예상 시점: 콜론 또는 하이픈 뒤 한 줄 전체
+                시점_m = re.search(r"예상 시점\s*[:\-]\s*(.+)", block)
+                시점   = 시점_m.group(1).strip().rstrip("*").strip() if 시점_m else ""
+
+                # 영향: 콜론 또는 하이픈 뒤 한 줄 전체
+                영향_m = re.search(r"집단 믿음에 미치는 영향\s*[:\-]\s*(.+)", block)
+                영향   = 영향_m.group(1).strip().rstrip("*").strip()[:100] if 영향_m else ""
+
                 col_t.markdown(
                     f"<div style='background:#fff;border:1.5px solid #e2e6ef;"
                     f"border-radius:10px;padding:14px;min-height:120px'>"
