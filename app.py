@@ -890,16 +890,30 @@ def cache_delete(target_id):
 
 def load_leaderboard():
     try:
-        resp=get_supabase().table("analyses").select("target_id,market_id,target_label,winner,bull_prob,neutral_prob,bear_prob,status,analyzed_at,consensus_tp").execute()
-        rows=[]
+        # consensus_tp 컬럼이 없을 경우를 대비해 먼저 기본 컬럼으로 시도
+        try:
+            resp = get_supabase().table("analyses").select(
+                "target_id,market_id,target_label,winner,bull_prob,neutral_prob,bear_prob,status,analyzed_at,consensus_tp"
+            ).execute()
+        except Exception:
+            # consensus_tp 컬럼 없을 때 fallback
+            resp = get_supabase().table("analyses").select(
+                "target_id,market_id,target_label,winner,bull_prob,neutral_prob,bear_prob,status,analyzed_at"
+            ).execute()
+        rows = []
         for r in resp.data:
-            if r.get("status")=="running": rows.append({**r,"age_hours":0}); continue
-            at=datetime.fromisoformat(r["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
-            age_h=(datetime.now(timezone.utc)-at).total_seconds()/3600
-            if age_h<=CACHE_TTL_HOURS: rows.append({**r,"age_hours":round(age_h,1)})
-        rows.sort(key=lambda r:(-(r.get("bull_prob") or 0),(r.get("bear_prob") or 0)))
+            if r.get("status") == "running":
+                rows.append({**r, "age_hours": 0})
+                continue
+            at    = datetime.fromisoformat(r["analyzed_at"].replace("Z","")).replace(tzinfo=timezone.utc)
+            age_h = (datetime.now(timezone.utc)-at).total_seconds()/3600
+            if age_h <= CACHE_TTL_HOURS:
+                rows.append({**r, "age_hours": round(age_h, 1)})
+        rows.sort(key=lambda r: (-(r.get("bull_prob") or 0), (r.get("bear_prob") or 0)))
         return rows
-    except: return []
+    except Exception as e:
+        print(f"load_leaderboard 오류: {e}")
+        return []
 
 def _has_chinese(text: str) -> bool:
     """중국어(한자) 문자 비율이 3% 이상이면 True"""
