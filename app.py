@@ -870,9 +870,9 @@ def cache_get(target_id):
         return row
     except: return None
 
-def cache_set(target_id, market_id, target_label, results, winner, bull_prob=50, neutral_prob=30, bear_prob=20, status="done"):
+def cache_set(target_id, market_id, target_label, results, winner, bull_prob=50, neutral_prob=30, bear_prob=20, status="done", consensus_tp=""):
     try:
-        get_supabase().table("analyses").upsert({"target_id":target_id,"market_id":market_id,"target_label":target_label,"results":results,"winner":winner,"bull_prob":bull_prob,"neutral_prob":neutral_prob,"bear_prob":bear_prob,"status":status,"analyzed_at":datetime.now(timezone.utc).isoformat()},on_conflict="target_id").execute()
+        get_supabase().table("analyses").upsert({"target_id":target_id,"market_id":market_id,"target_label":target_label,"results":results,"winner":winner,"bull_prob":bull_prob,"neutral_prob":neutral_prob,"bear_prob":bear_prob,"status":status,"consensus_tp":consensus_tp,"analyzed_at":datetime.now(timezone.utc).isoformat()},on_conflict="target_id").execute()
     except Exception as e: print(f"캐시 저장 오류: {e}")
 
 def cache_set_running(target_id, market_id, target_label):
@@ -890,7 +890,7 @@ def cache_delete(target_id):
 
 def load_leaderboard():
     try:
-        resp=get_supabase().table("analyses").select("target_id,market_id,target_label,winner,bull_prob,neutral_prob,bear_prob,status,analyzed_at").execute()
+        resp=get_supabase().table("analyses").select("target_id,market_id,target_label,winner,bull_prob,neutral_prob,bear_prob,status,analyzed_at,consensus_tp").execute()
         rows=[]
         for r in resp.data:
             if r.get("status")=="running": rows.append({**r,"age_hours":0}); continue
@@ -1190,6 +1190,30 @@ def winner_from_probs(b,n,r):
     probs={"bull":b or 0,"neutral":n or 0,"bear":r or 0}
     return max(probs,key=probs.get)
 
+def extract_tp(judge_text: str) -> str:
+    """
+    Judge 텍스트에서 애널리스트 평균 TP 추출.
+    예: "평균 TP 369달러 (n=5), 현재가 대비 +21.6%"  →  "369달러 +21.6%"
+        "평균 TP 220,000원 (n=3), 현재가 대비 +18.2%" →  "22만원 +18.2%"
+    """
+    if not judge_text: return ""
+    # 확인 가능한 TP 부족 케이스
+    if "확인 가능한 TP 부족" in judge_text or "TP 부족" in judge_text:
+        return ""
+    # 숫자+단위 패턴 (달러/원/엔)
+    patterns = [
+        r"평균\s*TP\s*[:\s]*([0-9,]+(?:\.[0-9]+)?(?:달러|원|엔|USD|\$)?).*?([+-]\d+\.?\d*%)",
+        r"TP\s*[:\s]*([0-9,]+(?:\.[0-9]+)?(?:달러|원|엔|USD|\$)?).*?([+-]\d+\.?\d*%)",
+        r"implied\s*(?:upside|downside)[:\s]*([+-]?\d+\.?\d*%)",
+    ]
+    import re as _re
+    for pat in patterns:
+        m = _re.search(pat, judge_text, _re.IGNORECASE)
+        if m:
+            groups = [g for g in m.groups() if g]
+            return " / ".join(groups[:2]) if len(groups) >= 2 else groups[0] if groups else ""
+    return ""
+
 def extract_probs(text):
     b=re.search(r"강세장[^:\n*]*[:\*]+\s*(\d+)%",text)
     n=re.search(r"보합장[^:\n*]*[:\*]+\s*(\d+)%",text)
@@ -1369,48 +1393,303 @@ def _run_analysis_core(target_id, target_label, market, stock, prompts):
     winner = winner_from_probs(bp, np_, rp)
     if bp == 50 and np_ == 30 and rp == 20:
         winner = extract_winner(results.get("judge", "")) or "neutral"
+    tp_str = extract_tp(results.get("judge",""))
     cache_set(target_id, market["id"], target_label, results, winner,
-              bull_prob=bp, neutral_prob=np_, bear_prob=rp, status="done")
+              bull_prob=bp, neutral_prob=np_, bear_prob=rp, status="done", consensus_tp=tp_str)
     update_progress(target_id, 1.0, "✅ 분석 완료!")
     return results, winner
 
 
 # ─── DISPLAY ──────────────────────────────────────────────────────────────────
+def _extract_section(text: str, heading: str) -> str:
+    """Judge 텍스트에서 특정 섹션 추출."""
+    if not text or not heading: return ""
+    pattern = rf"###\s*{re.escape(heading)}[^\n]*\n(.*?)(?=\n###|\Z)"
+    m = re.search(pattern, text, re.DOTALL)
+    return m.group(1).strip() if m else ""
+
 def display_results(results, winner, cached_at=None):
+    judge_text = results.get("judge", "")
+    w_map = {"bull":("📈 강세","#00e87a","#e6fff4"), "neutral":("➡️ 중립","#f5c518","#fffde6"), "bear":("📉 약세","#ff3c4e","#fff0f2")}
+    w_label, w_color, w_bg = w_map.get(winner, ("❓","#888","#f8f9fc"))
+    bp, np_, rp = extract_probs(judge_text)
+    bp = bp or 0; np_ = np_ or 0; rp = rp or 0
+
+    # ── 분석 메타 ───────────────────────────────────────────────────────────
     if cached_at:
         at = datetime.fromisoformat(cached_at.replace("Z","")).replace(tzinfo=timezone.utc)
         age_h = (datetime.now(timezone.utc)-at).total_seconds()/3600
-        remaining_h = CACHE_TTL_HOURS - age_h
-        remain_str = f"{int(remaining_h/24)}일 후 만료" if remaining_h > 48 else f"{int(remaining_h)}시간 후 만료"
-        st.info(f"🗄 캐시 결과 · 분석일시: {at.strftime('%Y-%m-%d %H:%M')} UTC · {age_label(age_h)} 분석 · {remain_str}")
-    w_map={"bull":("📈 강세","#00e87a"),"neutral":("➡️ 중립","#f5c518"),"bear":("📉 약세","#ff3c4e")}
-    w_label,w_color=w_map.get(winner,("❓","#888"))
-    st.markdown(f"""<div style='text-align:center;padding:16px;background:linear-gradient(135deg,{w_color}18,transparent);border:2px solid {w_color}66;border-radius:10px;margin:12px 0'>
-    <div style='color:#6b7a9e;font-size:11px;letter-spacing:2px;margin-bottom:6px'>가장 그럴듯한 내러티브</div>
-    <div style='color:{w_color};font-size:24px;font-weight:900'>{w_label}</div></div>""",unsafe_allow_html=True)
-    bp,np_,rp=extract_probs(results.get("judge",""))
-    if bp is not None:
-        st.markdown("#### 확률 분포")
-        c1,c2,c3=st.columns(3)
-        c1.metric("📈 강세장",f"{bp}%"); c1.progress(bp/100)
-        c2.metric("➡️ 보합장",f"{np_}%"); c2.progress(np_/100)
-        c3.metric("📉 약세장",f"{rp}%"); c3.progress(rp/100)
+        st.caption(f"🕐 분석일시: {at.strftime('%Y-%m-%d %H:%M')} UTC  ·  {age_label(age_h)} 분석  ·  AI 생성 · 투자 조언 아님")
+
+    # ══ SECTION 1: 판정 배너 ════════════════════════════════════════════════
+    st.markdown(f"""
+    <div style='background:linear-gradient(135deg,{w_color}30,{w_bg});
+    border:2px solid {w_color};border-radius:16px;padding:22px 28px;margin:4px 0 20px'>
+      <div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px'>
+        <div>
+          <div style='color:#6b7a9e;font-size:11px;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px'>
+            ⚡ 향후 3개월 내러티브 판정</div>
+          <div style='color:{w_color};font-size:36px;font-weight:900;line-height:1'>{w_label}</div>
+        </div>
+        <div style='display:flex;gap:24px'>
+          <div style='text-align:center'>
+            <div style='color:#00e87a;font-size:22px;font-weight:800'>↑{bp}%</div>
+            <div style='color:#6b7a9e;font-size:10px;margin-top:2px'>강세장</div>
+          </div>
+          <div style='text-align:center'>
+            <div style='color:#f5c518;font-size:22px;font-weight:800'>→{np_}%</div>
+            <div style='color:#6b7a9e;font-size:10px;margin-top:2px'>보합장</div>
+          </div>
+          <div style='text-align:center'>
+            <div style='color:#ff3c4e;font-size:22px;font-weight:800'>↓{rp}%</div>
+            <div style='color:#6b7a9e;font-size:10px;margin-top:2px'>약세장</div>
+          </div>
+        </div>
+      </div>
+      <div style='margin-top:14px'>
+        <div style='display:flex;height:8px;border-radius:4px;overflow:hidden;gap:2px'>
+          <div style='width:{bp}%;background:#00e87a;border-radius:4px 0 0 4px'></div>
+          <div style='width:{np_}%;background:#f5c518'></div>
+          <div style='width:{rp}%;background:#ff3c4e;border-radius:0 4px 4px 0'></div>
+        </div>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    # ══ SECTION 2: 핵심 요약 + 집단 믿음 (2열) ══════════════════════════════
+    summary = _extract_section(judge_text, "핵심 요약")
+    belief  = _extract_section(judge_text, "지배적 집단 믿음")
+    price   = _extract_section(judge_text, "현재 가격 기준 상황")
+    tp_sec  = _extract_section(judge_text, "해당 내러티브 지지 애널리스트 평균 TP")
+
+    col_left, col_right = st.columns([3, 2])
+    with col_left:
+        if summary:
+            st.markdown("**💡 핵심 요약**")
+            st.markdown(f"""<div style='background:#f8f9fc;border-left:4px solid {w_color};
+            border-radius:0 10px 10px 0;padding:14px 16px;
+            color:#2d3a5e;font-size:13.5px;line-height:1.85'>{summary}</div>""",
+            unsafe_allow_html=True)
+        if belief:
+            st.markdown("")
+            st.markdown("**🧠 시장의 지배적 집단 믿음**")
+            st.markdown(f"""<div style='background:#fff9e6;border:1.5px solid #f5c518;
+            border-radius:10px;padding:12px 16px;
+            color:#2d3a5e;font-size:13.5px;font-style:italic;line-height:1.7'>
+            "{belief}"</div>""", unsafe_allow_html=True)
+
+    with col_right:
+        # 현재가
+        if price:
+            st.markdown("**📍 현재가 기준 상황**")
+            st.markdown(f"""<div style='background:#fff;border:1.5px solid #e2e6ef;
+            border-radius:10px;padding:12px 16px;
+            color:#374151;font-size:13px;line-height:1.7'>{price}</div>""",
+            unsafe_allow_html=True)
+            st.markdown("")
+
+        # 애널리스트 TP
+        if tp_sec and "부족" not in tp_sec:
+            is_up = "+" in tp_sec
+            tp_color = "#00e87a" if is_up else "#ff3c4e" if "-" in tp_sec else "#6b7a9e"
+            st.markdown("**🎯 컨센서스 목표주가 (TP)**")
+            st.markdown(f"""<div style='background:#fff;border:1.5px solid {tp_color}88;
+            border-radius:10px;padding:12px 16px;
+            color:#374151;font-size:13px;line-height:1.7'>
+            <span style='color:{tp_color};font-weight:700'>{tp_sec}</span></div>""",
+            unsafe_allow_html=True)
+            st.markdown("")
+
+        # 판정 이유 (요약)
+        reason = _extract_section(judge_text, "판정 이유")
+        if reason:
+            st.markdown("**📝 판정 이유**")
+            # 첫 2문장만
+            sentences = [s.strip() for s in re.split(r'(?<=[.。])\s+', reason) if s.strip()]
+            brief = " ".join(sentences[:2]) if sentences else reason[:200]
+            st.markdown(f"""<div style='background:#fff;border:1.5px solid #e2e6ef;
+            border-radius:10px;padding:12px 16px;
+            color:#374151;font-size:13px;line-height:1.7'>{brief}…</div>""",
+            unsafe_allow_html=True)
+
+    # ══ SECTION 3: Not Yet Priced-In ════════════════════════════════════════
+    nyt = _extract_section(judge_text, "Not Yet Priced-In 핵심")
+    if not nyt: nyt = _extract_section(judge_text, "Not Yet Priced")
+    if nyt:
+        st.markdown("")
+        st.markdown("**🚀 아직 주가에 반영되지 않은 핵심 요인**")
+        # 미반영 요인만 추출 (탈락 내러티브 이전까지)
+        nyt_main = nyt.split("탈락 내러티브")[0].strip()
+        st.markdown(f"""<div style='background:linear-gradient(135deg,#e6fff4,#f0fff8);
+        border:1.5px solid #00e87a;border-radius:10px;padding:16px 18px;
+        color:#1a3a2a;font-size:13.5px;line-height:1.85'>{nyt_main}</div>""",
+        unsafe_allow_html=True)
+
+    # ══ SECTION 4: 트리거 카드 ══════════════════════════════════════════════
+    trigger_text = _extract_section(judge_text, "내러티브 실현 트리거")
+    if trigger_text:
+        st.markdown("")
+        st.markdown("**⏰ 주시해야 할 실현 트리거**")
+        blocks = re.split(r'\*\*트리거\s*\d+\s*:', trigger_text)
+        valid_blocks = [b.strip() for b in blocks[1:4] if b.strip()]
+        if valid_blocks:
+            cols_t = st.columns(len(valid_blocks))
+            for i, (col, block) in enumerate(zip(cols_t, valid_blocks)):
+                # 타이틀: ** 이전 내용
+                title = block.split("**")[0].strip().rstrip("*").strip()
+                # 예상 시점
+                시점_m = re.search(r"예상 시점[:\s*]*([^\n*]+)", block)
+                시점 = 시점_m.group(1).strip() if 시점_m else ""
+                # 영향
+                영향_m = re.search(r"집단 믿음에 미치는 영향[:\s*]*([^\n*]+)", block)
+                영향 = 영향_m.group(1).strip()[:80] if 영향_m else ""
+                icon = ["🔵","🟡","🔴"][i]
+                col.markdown(f"""<div style='background:#fff;border:1.5px solid #e2e6ef;
+                border-radius:10px;padding:14px;height:100%;min-height:120px'>
+                <div style='font-size:10px;color:#6b7a9e;font-weight:700;letter-spacing:1px;margin-bottom:6px'>
+                {icon} 트리거 {i+1}</div>
+                <div style='color:#2d3a5e;font-size:13px;font-weight:700;line-height:1.4;margin-bottom:8px'>{title}</div>
+                {"<div style='color:#4a7cf7;font-size:11px;margin-bottom:4px'>📅 " + 시점 + "</div>" if 시점 else ""}
+                {"<div style='color:#6b7a9e;font-size:11px;line-height:1.5'>" + 영향 + "</div>" if 영향 else ""}
+                </div>""", unsafe_allow_html=True)
+
+    # ══ SECTION 5: 상세 내러티브 (접기) ════════════════════════════════════
     st.markdown("---")
-    st.markdown("### 📈 강세 내러티브")
-    with st.expander(AGENT_LABELS["bull"], expanded=False):
+    st.markdown("**📖 상세 내러티브**")
+    t1, t2, t3, t4 = st.tabs(["📈 강세 내러티브", "➡️ 중립 내러티브", "📉 약세 내러티브", "📋 최종 판정 전문"])
+    with t1: st.markdown(results.get("bull","결과 없음"))
+    with t2: st.markdown(results.get("neutral","결과 없음"))
+    with t3: st.markdown(results.get("bear","결과 없음"))
+    with t4: st.markdown(judge_text or "결과 없음")
+
+
+    judge_text = results.get("judge", "")
+    w_map = {"bull": ("📈 강세", "#00e87a"), "neutral": ("➡️ 중립", "#f5c518"), "bear": ("📉 약세", "#ff3c4e")}
+    w_label, w_color = w_map.get(winner, ("❓", "#888"))
+    bp, np_, rp = extract_probs(judge_text)
+    bp = bp or 0; np_ = np_ or 0; rp = rp or 0
+
+    # ── 분석 메타 정보 ──────────────────────────────────────────────────────
+    if cached_at:
+        at = datetime.fromisoformat(cached_at.replace("Z","")).replace(tzinfo=timezone.utc)
+        age_h = (datetime.now(timezone.utc)-at).total_seconds()/3600
+        st.caption(f"🕐 분석일시: {at.strftime('%Y-%m-%d %H:%M')} UTC · {age_label(age_h)} 분석")
+
+    # ══ 1. 최종 판정 헤더 카드 ═══════════════════════════════════════════════
+    st.markdown(f"""
+    <div style='background:linear-gradient(135deg,{w_color}22,#fff);
+    border:2px solid {w_color};border-radius:14px;padding:20px 24px;margin:8px 0 16px'>
+      <div style='color:#6b7a9e;font-size:11px;letter-spacing:2px;margin-bottom:4px'>⚡ 최종 판정 — 향후 3개월</div>
+      <div style='color:{w_color};font-size:32px;font-weight:900;margin-bottom:12px'>{w_label}</div>
+      <div style='display:flex;gap:16px;align-items:center'>
+        <div style='flex:1;background:#fff8;border-radius:8px;padding:8px 12px;text-align:center'>
+          <div style='color:#00e87a;font-size:18px;font-weight:700'>↑ {bp}%</div>
+          <div style='color:#6b7a9e;font-size:10px'>강세장</div>
+          <div style='height:6px;background:#e2e6ef;border-radius:3px;margin-top:4px'>
+            <div style='width:{bp}%;height:6px;background:#00e87a;border-radius:3px'></div></div>
+        </div>
+        <div style='flex:1;background:#fff8;border-radius:8px;padding:8px 12px;text-align:center'>
+          <div style='color:#f5c518;font-size:18px;font-weight:700'>→ {np_}%</div>
+          <div style='color:#6b7a9e;font-size:10px'>보합장</div>
+          <div style='height:6px;background:#e2e6ef;border-radius:3px;margin-top:4px'>
+            <div style='width:{np_}%;height:6px;background:#f5c518;border-radius:3px'></div></div>
+        </div>
+        <div style='flex:1;background:#fff8;border-radius:8px;padding:8px 12px;text-align:center'>
+          <div style='color:#ff3c4e;font-size:18px;font-weight:700'>↓ {rp}%</div>
+          <div style='color:#6b7a9e;font-size:10px'>약세장</div>
+          <div style='height:6px;background:#e2e6ef;border-radius:3px;margin-top:4px'>
+            <div style='width:{rp}%;height:6px;background:#ff3c4e;border-radius:3px'></div></div>
+        </div>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    # ══ 2. 핵심 요약 (4문장) ════════════════════════════════════════════════
+    summary = _extract_section(judge_text, "핵심 요약")
+    if not summary:
+        # fallback: 텍스트 첫 단락
+        lines = [l.strip() for l in judge_text.split("\n") if l.strip() and not l.startswith("#")]
+        summary = "\n".join(lines[:4]) if lines else ""
+    if summary:
+        st.markdown("#### 💡 핵심 요약")
+        st.markdown(f"""<div style='background:#f0f7ff;border-left:4px solid #4a7cf7;
+        border-radius:0 8px 8px 0;padding:14px 16px;margin-bottom:12px;
+        color:#2d3a5e;font-size:14px;line-height:1.8'>{summary}</div>""",
+        unsafe_allow_html=True)
+
+    # ══ 3. 지배적 집단 믿음 ═════════════════════════════════════════════════
+    belief = _extract_section(judge_text, "지배적 집단 믿음")
+    if belief:
+        st.markdown(f"""<div style='background:#fff9e6;border:1.5px solid #f5c518;
+        border-radius:8px;padding:12px 16px;margin-bottom:16px'>
+        <span style='color:#6b7a9e;font-size:11px'>🧠 시장이 공유하는 집단 믿음</span><br>
+        <span style='color:#2d3a5e;font-size:14px;font-weight:600'>{belief}</span>
+        </div>""", unsafe_allow_html=True)
+
+    # ══ 4. Not Yet Priced-In 핵심 (투자 포인트) ════════════════════════════
+    nyt = _extract_section(judge_text, "Not Yet Priced-In 핵심")
+    if not nyt:
+        nyt = _extract_section(judge_text, "Not Yet Priced")
+    if nyt:
+        st.markdown("#### 🚀 아직 주가에 반영되지 않은 핵심 요인")
+        st.markdown(f"""<div style='background:#f0fff4;border:1.5px solid #00e87a;
+        border-radius:8px;padding:14px 16px;margin-bottom:8px;
+        color:#1a3a2a;font-size:14px;line-height:1.8'>{nyt}</div>""",
+        unsafe_allow_html=True)
+
+    # ══ 5. 실현 트리거 카드 ═════════════════════════════════════════════════
+    trigger_text = _extract_section(judge_text, "내러티브 실현 트리거")
+    if trigger_text:
+        st.markdown("#### ⏰ 주시해야 할 트리거")
+        # 트리거 1/2/3 파싱
+        trigger_blocks = re.split(r'\*\*트리거\s*\d+\s*:', trigger_text)
+        cols_t = st.columns(min(len(trigger_blocks)-1, 3)) if len(trigger_blocks) > 1 else None
+        if cols_t:
+            for i, block in enumerate(trigger_blocks[1:4]):
+                lines = [l.strip("* \n") for l in block.strip().split("\n") if l.strip("* \n")]
+                title = lines[0].rstrip("**").strip() if lines else f"트리거 {i+1}"
+                detail_lines = lines[1:] if len(lines) > 1 else []
+                detail_html = "".join(f"<div style='color:#4a5568;font-size:11px;margin-top:3px'>{d}</div>" for d in detail_lines[:3])
+                cols_t[i].markdown(f"""<div style='background:#fff;border:1.5px solid #e2e6ef;
+                border-radius:8px;padding:12px;height:100%'>
+                <div style='color:#4a7cf7;font-size:11px;font-weight:700;margin-bottom:4px'>트리거 {i+1}</div>
+                <div style='color:#2d3a5e;font-size:13px;font-weight:600'>{title}</div>
+                {detail_html}</div>""", unsafe_allow_html=True)
+        else:
+            st.markdown(trigger_text)
+
+    # ══ 6. 세 내러티브 비교 요약 ════════════════════════════════════════════
+    st.markdown("#### 📊 세 내러티브 비교")
+    nc1, nc2, nc3 = st.columns(3)
+    for col, agent, label, color in [
+        (nc1, "bull",    "📈 강세", "#00e87a"),
+        (nc2, "neutral", "➡️ 중립", "#f5c518"),
+        (nc3, "bear",    "📉 약세", "#ff3c4e"),
+    ]:
+        txt = results.get(agent, "")
+        # 3줄 요약 추출
+        summary_3 = _extract_section(txt, f"{label.split()[1]} 내러티브 3줄 요약")
+        if not summary_3:
+            summary_3 = _extract_section(txt, "내러티브 3줄 요약")
+        # 강도 점수
+        score_m = re.search(r"내러티브 강도.*?\[?(\d+)(?:/10)?]?", txt)
+        score = score_m.group(1) if score_m else "?"
+        col.markdown(f"""<div style='background:#fff;border:1.5px solid {color}55;
+        border-radius:10px;padding:14px;height:100%'>
+        <div style='color:{color};font-size:15px;font-weight:800;margin-bottom:6px'>{label}</div>
+        <div style='color:#6b7a9e;font-size:10px;margin-bottom:6px'>내러티브 강도: <b>{score}/10</b></div>
+        <div style='color:#374151;font-size:12px;line-height:1.6'>{summary_3 or "—"}</div>
+        </div>""", unsafe_allow_html=True)
+
+    # ══ 7. 상세 내러티브 (접기 가능) ════════════════════════════════════════
+    st.markdown("---")
+    with st.expander("📖 강세 내러티브 상세 보기"):
         st.markdown(results.get("bull","결과 없음"))
-
-    st.markdown("### ➡️ 중립 내러티브")
-    with st.expander(AGENT_LABELS["neutral"], expanded=False):
+    with st.expander("📖 중립 내러티브 상세 보기"):
         st.markdown(results.get("neutral","결과 없음"))
-
-    st.markdown("### 📉 약세 내러티브")
-    with st.expander(AGENT_LABELS["bear"], expanded=False):
+    with st.expander("📖 약세 내러티브 상세 보기"):
         st.markdown(results.get("bear","결과 없음"))
+    with st.expander("📋 최종 판정 전문 보기"):
+        st.markdown(judge_text or "결과 없음")
 
-    st.markdown("### ⚡ 최종 판정")
-    with st.expander(AGENT_LABELS["judge"], expanded=True):
-        st.markdown(results.get("judge","결과 없음"))
 
 def display_leaderboard():
     rows=load_leaderboard()
@@ -1441,8 +1720,8 @@ def display_leaderboard():
     st.caption("💡 기업명을 클릭하면 분석 결과가 아래에 표시됩니다.")
     mf = {"kospi200":"🇰🇷","sp500":"🇺🇸","nikkei225":"🇯🇵"}
 
-    h1,h2,h3,h4,h5,h6 = st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
-    for h,t in zip([h1,h2,h3,h4,h5,h6],["순위","시장","종목/지수","판정","확률 분포","분석"]):
+    h1,h2,h3,h4,h5,h6,h7 = st.columns([0.4,0.3,2.0,1.0,2.2,1.0,0.7])
+    for h,t in zip([h1,h2,h3,h4,h5,h6,h7],["순위","시장","종목/지수","판정","확률 분포","컨센서스 TP","분석"]):
         h.markdown(f"<span style='color:#4a5568;font-size:11px'>{t}</span>",unsafe_allow_html=True)
     st.markdown("<hr style='margin:4px 0;border-color:#e2e6ef'>",unsafe_allow_html=True)
 
@@ -1458,8 +1737,9 @@ def display_leaderboard():
         is_running = row.get("status") == "running"
         is_selected= (selected_id == tid)
         rc         = "#00e87a" if bp>=55 else "#f5c518" if bp>=45 else "#ff3c4e"
+        tp_raw     = row.get("consensus_tp") or ""
 
-        c1,c2,c3,c4,c5,c6 = st.columns([0.4,0.3,2.2,1.0,2.5,0.8])
+        c1,c2,c3,c4,c5,c6,c7 = st.columns([0.4,0.3,2.0,1.0,2.2,1.0,0.7])
 
         c1.markdown(
             f"<div style='color:{rc};font-weight:900;font-size:14px;padding-top:8px'>#{rank}</div>",
@@ -1488,6 +1768,7 @@ def display_leaderboard():
             c5.markdown(
                 "<div style='color:#6b7a9e;font-size:11px;padding-top:8px'>진행 중...</div>",
                 unsafe_allow_html=True)
+            c6.markdown("")
         else:
             c4.markdown(winner_badge(w))
             bar = (
@@ -1502,7 +1783,26 @@ def display_leaderboard():
             )
             c5.markdown(bar, unsafe_allow_html=True)
 
-        c6.markdown(
+            # TP 컬럼: upside는 색상으로 강조
+            if tp_raw:
+                tp_color = "#00e87a" if "+" in tp_raw else "#ff3c4e" if "-" in tp_raw else "#6b7a9e"
+                # TP값과 upside를 분리해서 표시
+                parts = tp_raw.split(" / ")
+                tp_val = parts[0] if parts else tp_raw
+                tp_upside = parts[1] if len(parts) > 1 else ""
+                tp_html = (
+                    f"<div style='font-size:11px;font-weight:600;color:#2d3a5e;padding-top:4px'>{tp_val}</div>"
+                    f"<div style='font-size:11px;color:{tp_color};font-weight:700'>{tp_upside}</div>"
+                ) if tp_upside else (
+                    f"<div style='font-size:11px;color:{tp_color};font-weight:600;padding-top:6px'>{tp_val}</div>"
+                )
+                c6.markdown(tp_html, unsafe_allow_html=True)
+            else:
+                c6.markdown(
+                    "<div style='color:#d0d5e0;font-size:11px;padding-top:8px'>—</div>",
+                    unsafe_allow_html=True)
+
+        c7.markdown(
             f"<div style='color:#374151;font-size:10px;padding-top:8px'>"
             f"{'진행중' if is_running else age_label(row['age_hours'])}</div>",
             unsafe_allow_html=True)
