@@ -871,9 +871,27 @@ def cache_get(target_id):
     except: return None
 
 def cache_set(target_id, market_id, target_label, results, winner, bull_prob=50, neutral_prob=30, bear_prob=20, status="done", consensus_tp=""):
+    data = {
+        "target_id": target_id, "market_id": market_id, "target_label": target_label,
+        "results": results, "winner": winner, "bull_prob": bull_prob,
+        "neutral_prob": neutral_prob, "bear_prob": bear_prob, "status": status,
+        "analyzed_at": datetime.now(timezone.utc).isoformat(),
+    }
     try:
-        get_supabase().table("analyses").upsert({"target_id":target_id,"market_id":market_id,"target_label":target_label,"results":results,"winner":winner,"bull_prob":bull_prob,"neutral_prob":neutral_prob,"bear_prob":bear_prob,"status":status,"consensus_tp":consensus_tp,"analyzed_at":datetime.now(timezone.utc).isoformat()},on_conflict="target_id").execute()
-    except Exception as e: print(f"캐시 저장 오류: {e}")
+        # consensus_tp 컬럼 포함해서 시도
+        get_supabase().table("analyses").upsert(
+            {**data, "consensus_tp": consensus_tp}, on_conflict="target_id"
+        ).execute()
+    except Exception as e:
+        print(f"캐시 저장 오류(consensus_tp 포함): {e}")
+        try:
+            # consensus_tp 없이 재시도 (컬럼이 아직 없는 경우 fallback)
+            get_supabase().table("analyses").upsert(
+                data, on_conflict="target_id"
+            ).execute()
+            print("캐시 저장 성공 (consensus_tp 제외)")
+        except Exception as e2:
+            print(f"캐시 저장 최종 실패: {e2}")
 
 def cache_set_running(target_id, market_id, target_label):
     try:
