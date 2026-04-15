@@ -755,20 +755,65 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
 
     cutoff_str = (datetime.now()-timedelta(days=90)).strftime("%Y-%m-%d")
 
+    # 뉴스 충돌 감지: 동일 키워드에 상반된 표현이 있는지 확인
+    CONFLICT_PAIRS = [
+        (["수주 완료","계약 체결","수주 확정","낙찰"], ["수주 협의","수주 검토","수주 준비","입찰 참여"]),
+        (["흑자 전환","흑자","이익 개선"], ["적자","손실","이익 감소"]),
+        (["계약 유지","계약 연장","재계약"], ["계약 해지","계약 종료","계약 취소"]),
+        (["인수 완료","인수 확정"], ["인수 협의","인수 검토","인수 추진"]),
+        (["생산 재개","공장 재가동"], ["생산 중단","공장 가동 중단","파업"]),
+        (["매출 증가","실적 개선","어닝 서프라이즈"], ["매출 감소","실적 부진","어닝 미스"]),
+        (["rating upgrade","buy","outperform"], ["rating downgrade","sell","underperform"]),
+        (["order win","contract awarded","deal signed"], ["order under discussion","bidding","exploring"]),
+    ]
+
+    def detect_conflicts(items):
+        """뉴스 목록에서 충돌 쌍을 감지해 경고 문자열 반환"""
+        all_text = [(r.get("date","")[:10], (r.get("title","") + " " + r.get("content","")).lower()) for r in items if r.get("date")]
+        all_text.sort(key=lambda x: x[0], reverse=True)  # 최신순
+        warnings = []
+        for pos_kw, neg_kw in CONFLICT_PAIRS:
+            pos_hits = [(d,t) for d,t in all_text if any(k.lower() in t for k in pos_kw)]
+            neg_hits = [(d,t) for d,t in all_text if any(k.lower() in t for k in neg_kw)]
+            if pos_hits and neg_hits:
+                latest_pos = pos_hits[0][0] if pos_hits else ""
+                latest_neg = neg_hits[0][0] if neg_hits else ""
+                winner = "긍정" if latest_pos >= latest_neg else "부정"
+                winner_kw = pos_kw[0] if latest_pos >= latest_neg else neg_kw[0]
+                loser_kw  = neg_kw[0] if latest_pos >= latest_neg else pos_kw[0]
+                warnings.append(
+                    f"⚠️ 충돌 감지: '{winner_kw}' 관련 보도({latest_pos if winner=='긍정' else latest_neg})가 최신 → 채택 | "
+                    f"'{loser_kw}' 관련 구보도는 폐기"
+                )
+        return warnings
+
     def fmt(items, label, show_p=False):
         if not items: return f"【{label}】\n결과 없음\n"
-        lines=[f"【{label}】"]; valid=0
-        for r in items:
-            ds=r.get("date") or ""
-            if ds and len(ds)>=10 and ds[:10]<cutoff_str: continue
-            valid+=1
-            d=f" ({ds[:10]})" if ds else ""
-            pl=f"[{r.get('platform','')}] " if show_p and r.get("platform") else ""
+        # 날짜 역순 정렬 (최신 먼저)
+        items_sorted = sorted(
+            [r for r in items if not (r.get("date","") and len(r.get("date",""))>=10 and r["date"][:10]<cutoff_str)],
+            key=lambda r: r.get("date","") or "",
+            reverse=True
+        )
+        if not items_sorted: return f"【{label}】\n최근 3개월 내 유의미한 결과 없음\n"
+
+        # 충돌 감지
+        conflicts = detect_conflicts(items_sorted)
+
+        lines = [f"【{label}】"]
+        if conflicts:
+            lines.append("  📌 [뉴스 충돌 감지 — 최신 우선 채택]")
+            for w in conflicts:
+                lines.append(f"  {w}")
+            lines.append("")
+
+        for r in items_sorted:
+            d  = f" ({r['date'][:10]})" if r.get("date") else " (날짜미상)"
+            pl = f"[{r.get('platform','')}] " if show_p and r.get("platform") else ""
             lines.append(f"■ {pl}{r.get('title','')}{d}")
-            if r.get("url"): lines.append(f"  {r['url']}")
+            if r.get("url"):     lines.append(f"  {r['url']}")
             if r.get("content"): lines.append(f"  {r['content']}")
             lines.append("")
-        if valid==0: return f"【{label}】\n최근 3개월 내 유의미한 결과 없음\n"
         return "\n".join(lines)
 
     def fmt_quant(items, label):
@@ -1002,24 +1047,38 @@ def build_system_prompts(market, stock=None):
             KOREAN_ONLY +
             f"당신은 월스트리트 최고의 투자 애널리스트입니다. "
             f"제공된 영어 리포트·Reddit/StockTwits 여론·어닝콜을 깊이 분석하십시오. "
-            f"🚨 {cutoff_str_ko} 이전 데이터는 무시하십시오."
+            f"🚨 {cutoff_str_ko} 이전 데이터는 무시하십시오.\n"
+            f"🔁 뉴스 충돌 처리: 동일 사안에 대해 상반된 보도(예: '수주 협의 중' vs '수주 완료')가 있으면 "
+            f"반드시 날짜가 최신인 뉴스를 사실로 채택하고, 구버전 보도는 폐기하십시오. "
+            f"충돌이 확인된 경우 '최신 보도 기준: [내용] (구보도 [내용]은 폐기)'로 명시하십시오."
         )
     elif market["id"]=="nikkei225":
         lang=(
             KOREAN_ONLY +
             f"당신은 일본 시장 전문 애널리스트입니다. "
             f"제공된 일본어 자료를 깊이 분석하되, 출력은 반드시 한국어로 하십시오. "
-            f"🚨 {cutoff_str_ko} 이전 데이터는 무시하십시오."
+            f"🚨 {cutoff_str_ko} 이전 데이터는 무시하십시오.\n"
+            f"🔁 뉴스 충돌 처리: 동일 사안에 대해 상반된 보도가 있으면 "
+            f"반드시 날짜가 최신인 뉴스를 사실로 채택하고 구버전은 폐기하십시오. "
+            f"충돌이 확인된 경우 '최신 보도 기준: [내용]'으로 명시하십시오."
         )
-    else:  # kospi200 — qwen2.5 사용, 한국어 강제 필수
+    else:  # kospi200
         lang=(
             KOREAN_ONLY +
             f"당신은 여의도 최고의 한국 시장 전문 애널리스트입니다. "
             f"주어진 한국어 뉴스·네이버 뉴스·종토방 여론·실적발표 자료를 깊이 분석하십시오. "
-            f"🚨 {cutoff_str_ko} 이전 데이터는 절대 무시하고 최신 정보만 인용하십시오."
+            f"🚨 {cutoff_str_ko} 이전 데이터는 절대 무시하고 최신 정보만 인용하십시오.\n"
+            f"🔁 뉴스 충돌 처리: 동일 사안에 대해 상반된 보도(예: '수주 협의 중' vs '수주 완료', "
+            f"'계약 해지' vs '계약 유지')가 있으면 반드시 날짜가 최신인 뉴스를 사실로 채택하고, "
+            f"구버전 보도는 폐기하십시오. "
+            f"충돌이 확인된 경우 '최신 보도 기준: [내용] (이전 보도 [내용]은 폐기)'로 명시하십시오."
         )
 
-    warn=f"\n⚠️ 절대 금지: 검색 결과에 없는 수치 조작 금지. {cutoff_str_ko} 이전 데이터 배제."
+    warn=(
+        f"\n⚠️ 절대 금지: 검색 결과에 없는 수치 조작 금지. {cutoff_str_ko} 이전 데이터 배제.\n"
+        f"⚠️ 뉴스 충돌 시 최신 날짜 기사를 우선하고, 오래된 기사는 절대 사용하지 말 것. "
+        f"날짜 미상 기사는 최신 기사와 충돌 시 폐기할 것."
+    )
     c_warn=(
         "【언어 규칙 재확인】 출력 언어: 한국어 100%. "
         "중국어·영어·일본어 출력 절대 금지. "
@@ -1407,6 +1466,15 @@ def _run_analysis_core(target_id, target_label, market, stock, prompts):
                 f"【주가 컨텍스트 — Priced-In 판단 보조】\n{price_action_ctx}\n\n"
                 f"{'='*50}\n\n"
                 f"【{dir_label} 방향 타깃 수집 자료】\n{targeted_data}\n\n"
+                f"{'='*50}\n\n"
+                f"【⚠️ 뉴스 충돌 처리 지시 — 반드시 준수】\n"
+                f"수집된 뉴스 중 동일 사안에 대해 상반된 내용이 있을 경우(예: '수주 협의 중' vs '수주 완료', "
+                f"'계약 해지' vs '계약 유지', '적자' vs '흑자 전환' 등):\n"
+                f"1. 반드시 날짜(pubDate)가 최신인 기사를 사실로 채택한다.\n"
+                f"2. 날짜가 오래된 기사의 내용은 폐기하고 분석에 사용하지 않는다.\n"
+                f"3. 충돌이 확인된 경우 해당 항목에 명시한다: "
+                f"'✅ 최신 보도({'{날짜}'}): [채택 내용] — 구보도({'{구날짜}'}): [폐기 내용]'\n"
+                f"4. 날짜가 명시되지 않은 기사는 최신 기사와 충돌 시 무조건 폐기한다.\n\n"
                 f"위 자료를 바탕으로 {dir_label} 내러티브를 발굴하십시오.\n"
                 f"핵심: ④항 'Not Yet Priced-In'에 집중하십시오 — 이것이 향후 주가를 움직입니다."
             )
