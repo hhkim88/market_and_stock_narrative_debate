@@ -522,43 +522,246 @@ def _fetch_earnings_tavily_us(name,ticker,yr,q,q_p):
     if not snippets: return f"[{name} 어닝콜 뉴스 없음]"
     return f"【{name} 어닝콜·실적발표】\n\n" + "\n\n".join(snippets[:5])
 
-def _fetch_fmp(ticker,fmp_key,yr,yr_p):
-    import urllib.request,json as _j; found=None
-    for y in [yr,yr_p]:
-        for q in [4,3,2,1]:
-            url=f"https://financialmodelingprep.com/api/v3/earning_call_transcript/{ticker}?quarter={q}&year={y}&apikey={fmp_key}"
+def _fetch_fmp(ticker, fmp_key, yr, yr_p):
+    """FMP 어닝콜 트랜스크립트 — 미국 종목 전용 (무료 플랜)"""
+    import urllib.request, json as _j
+    found = None
+    last_err = ""
+    for y in [yr, yr_p]:
+        for q in [4, 3, 2, 1]:
+            url = f"https://financialmodelingprep.com/api/v3/earning_call_transcript/{ticker}?quarter={q}&year={y}&apikey={fmp_key}"
             try:
-                req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0"})
-                with urllib.request.urlopen(req,timeout=8) as r: data=_j.loads(r.read())
-                if data and isinstance(data,list) and data[0].get("content"): found=(data[0],q,y); break
-            except: continue
+                req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    data = _j.loads(r.read())
+                if data and isinstance(data, list) and data[0].get("content"):
+                    found = (data[0], q, y); break
+            except Exception as e:
+                last_err = str(e)
+                continue
         if found: break
-    if not found: return None
-    row,q,y=found; text=row.get("content","")
-    if len(text)>6000: text=text[:3500]+"\n[중략]\n"+text[-2000:]
+    if not found:
+        print(f"[FMP] {ticker} 어닝콜 조회 실패: {last_err[:100] if last_err else '데이터 없음 (무료 플랜은 미국 종목만 지원)'}")
+        return None
+    row, q, y = found
+    text = row.get("content", "")
+    if len(text) > 6000: text = text[:3500] + "\n[중략]\n" + text[-2000:]
     return f"【어닝콜: {ticker} Q{q} {y}】\n(Financial Modeling Prep)\n\n{text}"
 
+
 def fetch_fmp_financial_snapshot(ticker_raw, market_id="sp500"):
-    if not ticker_raw or market_id!="sp500": return None
-    fmp_key=st.secrets.get("FMP_API_KEY","")
-    if not fmp_key or fmp_key.strip() in ("","...","여기에_FMP_키"): return None
-    ticker=FMP_TICKER_MAP.get(ticker_raw,ticker_raw).replace(".","‑")
-    headers={"User-Agent":"Mozilla/5.0"}
-    endpoints={"income_statement":f"https://financialmodelingprep.com/api/v3/income-statement/{ticker}?limit=2&apikey={fmp_key}","ratios":f"https://financialmodelingprep.com/api/v3/ratios/{ticker}?limit=2&apikey={fmp_key}","analyst_estimates":f"https://financialmodelingprep.com/api/v3/analyst-estimates/{ticker}?limit=2&apikey={fmp_key}"}
-    out=[]
-    for label,url in endpoints.items():
+    """
+    FMP 재무 스냅샷 (미국 종목 전용, 무료 플랜).
+    Yahoo Finance 스냅샷이 추가되어 FMP가 실패해도 fallback 가능.
+    """
+    if not ticker_raw or market_id != "sp500": return None
+    fmp_key = st.secrets.get("FMP_API_KEY", "")
+    if not fmp_key or fmp_key.strip() in ("", "...", "여기에_FMP_키"):
+        print("[FMP] API 키 미설정 — Yahoo Finance fallback 권장")
+        return None
+    ticker = FMP_TICKER_MAP.get(ticker_raw, ticker_raw).replace(".", "‑")
+    headers = {"User-Agent":"Mozilla/5.0"}
+    endpoints = {
+        "income_statement":   f"https://financialmodelingprep.com/api/v3/income-statement/{ticker}?limit=2&apikey={fmp_key}",
+        "ratios":             f"https://financialmodelingprep.com/api/v3/ratios/{ticker}?limit=2&apikey={fmp_key}",
+        "analyst_estimates":  f"https://financialmodelingprep.com/api/v3/analyst-estimates/{ticker}?limit=2&apikey={fmp_key}",
+    }
+    out = []
+    errors = []
+    for label, url in endpoints.items():
         try:
-            r=requests.get(url,headers=headers,timeout=10)
-            if r.status_code!=200: continue
-            data=r.json()
-            if not data or not isinstance(data,list): continue
-            row=data[0]
-            if label=="income_statement": out.append(f"■ 손익: 매출={row.get('revenue')}, 영업이익={row.get('operatingIncome')}, 순이익={row.get('netIncome')}, EPS={row.get('eps')}, 일={row.get('date')}")
-            elif label=="ratios": out.append(f"■ 비율: grossMargin={row.get('grossProfitMargin')}, opMargin={row.get('operatingProfitMargin')}, netMargin={row.get('netProfitMargin')}, ROE={row.get('returnOnEquity')}")
-            elif label=="analyst_estimates": out.append(f"■ 추정: revAvg={row.get('estimatedRevenueAvg')}, epsAvg={row.get('estimatedEpsAvg')}, date={row.get('date')}")
-        except: continue
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code != 200:
+                errors.append(f"{label} HTTP {r.status_code}")
+                continue
+            data = r.json()
+            if not data or not isinstance(data, list):
+                errors.append(f"{label} empty")
+                continue
+            row = data[0]
+            if label == "income_statement":
+                out.append(f"■ 손익: 매출={row.get('revenue')}, 영업이익={row.get('operatingIncome')}, 순이익={row.get('netIncome')}, EPS={row.get('eps')}, 일={row.get('date')}")
+            elif label == "ratios":
+                out.append(f"■ 비율: grossMargin={row.get('grossProfitMargin')}, opMargin={row.get('operatingProfitMargin')}, netMargin={row.get('netProfitMargin')}, ROE={row.get('returnOnEquity')}")
+            elif label == "analyst_estimates":
+                out.append(f"■ 추정: revAvg={row.get('estimatedRevenueAvg')}, epsAvg={row.get('estimatedEpsAvg')}, date={row.get('date')}")
+        except Exception as e:
+            errors.append(f"{label}: {str(e)[:50]}")
+            continue
+    if errors:
+        print(f"[FMP] 일부 실패: {' | '.join(errors)}")
     if not out: return None
     return "【FMP 구조화 정량 스냅샷】\n" + "\n".join(out)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Yahoo Finance — 글로벌 종목 정량 데이터 (FMP 대체/보완)
+# 무료, 모든 시장(미국·한국·일본 등) 지원, API 키 불필요
+# ──────────────────────────────────────────────────────────────────────────────
+def fetch_yahoo_finance_snapshot(ticker_raw, market_id="sp500"):
+    """
+    Yahoo Finance 재무·밸류에이션 스냅샷 (yfinance 패키지 사용).
+    한국: 005930.KS (삼성전자) / 일본: 7203.T (토요타) / 미국: AAPL
+    제공 데이터: 주가, 시총, PER, PBR, EPS, 매출, 영업이익률, 부채비율, 배당, 베타 등
+    """
+    if not ticker_raw: return None
+    try:
+        import yfinance as yf
+    except ImportError:
+        print("[Yahoo] yfinance 패키지 미설치")
+        return None
+
+    # 시장별 ticker suffix 변환
+    if market_id == "kospi200":
+        yh_ticker = f"{ticker_raw}.KS"
+    elif market_id == "nikkei225":
+        # Nikkei: 4-digit code + .T (예: 토요타 7203 → 7203.T)
+        yh_ticker = f"{ticker_raw}.T" if ticker_raw.isdigit() else ticker_raw
+    else:  # sp500
+        yh_ticker = ticker_raw.replace("/", "-")  # BRK/B → BRK-B
+
+    try:
+        t = yf.Ticker(yh_ticker)
+        info = t.info
+        if not info or not info.get("symbol"):
+            print(f"[Yahoo] {yh_ticker} 데이터 없음")
+            return None
+
+        # 안전한 숫자 포맷
+        def _f(v, scale=1, dec=2, suffix=""):
+            try:
+                if v is None: return "N/A"
+                return f"{(float(v) / scale):.{dec}f}{suffix}"
+            except: return "N/A"
+
+        def _pct(v):
+            try:
+                if v is None: return "N/A"
+                return f"{float(v)*100:.2f}%"
+            except: return "N/A"
+
+        currency = info.get("currency", "USD")
+        out = [
+            f"■ 기본: {info.get('longName','')} ({yh_ticker}) · 통화 {currency}",
+            f"  현재가: {_f(info.get('currentPrice'))}{currency} · 시총: {_f(info.get('marketCap'), 1e9)}B{currency}",
+            f"  52주 범위: {_f(info.get('fiftyTwoWeekLow'))} ~ {_f(info.get('fiftyTwoWeekHigh'))}",
+            f"  베타: {_f(info.get('beta'))} · 배당수익률: {_pct(info.get('dividendYield'))}",
+            f"■ 밸류에이션: PER(forward)={_f(info.get('forwardPE'))} · PER(trailing)={_f(info.get('trailingPE'))} · PBR={_f(info.get('priceToBook'))} · PSR={_f(info.get('priceToSalesTrailing12Months'))}",
+            f"■ 수익성: 영업이익률={_pct(info.get('operatingMargins'))} · 순이익률={_pct(info.get('profitMargins'))} · ROE={_pct(info.get('returnOnEquity'))} · ROA={_pct(info.get('returnOnAssets'))}",
+            f"■ 성장: 매출성장(YoY)={_pct(info.get('revenueGrowth'))} · EPS성장(YoY)={_pct(info.get('earningsGrowth'))}",
+            f"■ 재무: 부채비율(D/E)={_f(info.get('debtToEquity'))} · 유동비율={_f(info.get('currentRatio'))} · 영업현금흐름={_f(info.get('operatingCashflow'), 1e9)}B",
+            f"■ EPS: TTM={_f(info.get('trailingEps'))} · Forward={_f(info.get('forwardEps'))}",
+            f"■ 애널리스트: 평균TP={_f(info.get('targetMeanPrice'))} · n={info.get('numberOfAnalystOpinions','N/A')} · 추천={info.get('recommendationKey','N/A')}",
+        ]
+        return "【Yahoo Finance 정량 스냅샷】\n" + "\n".join(out)
+    except Exception as e:
+        print(f"[Yahoo] {yh_ticker} 조회 오류: {e}")
+        return None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# FRED API — 거시 경제 데이터 (금리·CPI·실업률·환율)
+# https://fred.stlouisfed.org/docs/api/api_key.html
+# 무료 API 키 필요 (1분 발급)
+# ──────────────────────────────────────────────────────────────────────────────
+# 핵심 시리즈 ID:
+#   FEDFUNDS    : 미국 연방기금금리
+#   DGS10       : 미국 10년물 국채금리
+#   CPIAUCSL    : 미국 CPI (All Urban Consumers)
+#   UNRATE      : 미국 실업률
+#   DEXKOUS     : 한국 원/달러 환율
+#   DEXJPUS     : 일본 엔/달러 환율
+#   VIXCLS      : VIX 변동성 지수
+FRED_KEY_SERIES = {
+    "FEDFUNDS":  "미국 연방기금금리",
+    "DGS10":     "미국 10년물 국채금리",
+    "CPIAUCSL":  "미국 CPI (소비자물가지수)",
+    "UNRATE":    "미국 실업률",
+    "DEXKOUS":   "원/달러 환율",
+    "DEXJPUS":   "엔/달러 환율",
+    "VIXCLS":    "VIX 변동성 지수",
+}
+
+def fetch_fred_macro_context(market_id="sp500"):
+    """
+    FRED API로 거시 경제 컨텍스트 수집.
+    각 종목 분석 시 매크로 환경을 함께 제공하여 뉴스 애널리스트의 분석 품질 향상.
+    """
+    fred_key = st.secrets.get("FRED_API_KEY", "")
+    if not fred_key or fred_key.strip() in ("", "...", "여기에_FRED_키"):
+        return None
+
+    # 시장별 관심 시리즈 (모두 포함하되 환율은 시장별로 우선순위 다름)
+    series = ["FEDFUNDS", "DGS10", "CPIAUCSL", "UNRATE", "VIXCLS"]
+    if market_id == "kospi200":
+        series.insert(2, "DEXKOUS")
+    elif market_id == "nikkei225":
+        series.insert(2, "DEXJPUS")
+
+    out = []
+    for sid in series:
+        try:
+            url = "https://api.stlouisfed.org/fred/series/observations"
+            params = {
+                "series_id": sid,
+                "api_key": fred_key,
+                "file_type": "json",
+                "sort_order": "desc",
+                "limit": 2,  # 최신값 + 직전값 (변화율 계산)
+            }
+            r = requests.get(url, params=params, timeout=10)
+            if r.status_code != 200:
+                continue
+            obs = r.json().get("observations", [])
+            if not obs: continue
+            latest = obs[0]
+            prev = obs[1] if len(obs) > 1 else None
+            label = FRED_KEY_SERIES.get(sid, sid)
+
+            try:
+                latest_v = float(latest["value"])
+                line = f"■ {label} ({latest['date']}): {latest_v}"
+                if prev:
+                    try:
+                        prev_v = float(prev["value"])
+                        delta = latest_v - prev_v
+                        sign = "↑" if delta > 0 else "↓" if delta < 0 else "="
+                        line += f" ({sign}{abs(delta):.2f} vs 직전 {prev['date']})"
+                    except: pass
+                out.append(line)
+            except:
+                continue
+        except Exception as e:
+            print(f"[FRED] {sid} 오류: {e}")
+            continue
+
+    if not out: return None
+    return "【FRED 거시 경제 컨텍스트】\n" + "\n".join(out)
+
+
+def fetch_quant_data_unified(ticker_raw, market_id="sp500"):
+    """
+    통합 정량 데이터 수집: Yahoo Finance(주력) + FMP(미국만, 보완) + FRED 거시.
+    각 분석에 한 번 호출하여 모든 데이터를 한 번에 가져옴.
+    """
+    sections = []
+
+    # 1) Yahoo Finance — 모든 시장 지원 (주력)
+    yh = fetch_yahoo_finance_snapshot(ticker_raw, market_id)
+    if yh: sections.append(yh)
+
+    # 2) FMP — 미국 종목만, Yahoo 보완용
+    if market_id == "sp500":
+        fmp = fetch_fmp_financial_snapshot(ticker_raw, market_id)
+        if fmp: sections.append(fmp)
+
+    # 3) FRED 거시 — 모든 시장
+    macro = fetch_fred_macro_context(market_id)
+    if macro: sections.append(macro)
+
+    if not sections:
+        return None
+    return "\n\n".join(sections)
 
 
 # ─── 네이버 뉴스 API (KOSPI 한국 기업 전용) ─────────────────────────────────────
@@ -736,7 +939,9 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
         )
         # 정량 근거: 네이버 quant만 사용 (Tavily/Exa quant 불필요)
         qr = collect_quant_evidence([], entity_info=entity, market_id=market_id, target=target, ticker_raw=ticker_raw)
-        tr, er, sr, fs = [], [], [], None  # 국내 Tavily/Exa 비활성화
+        # ⑦ 통합 정량 스냅샷 (Yahoo Finance + FRED 거시) — 한국 종목도 가능
+        fs = fetch_quant_data_unified(ticker_raw, market_id=market_id) if ticker_raw else None
+        tr, er, sr = [], [], []  # 국내 Tavily/Exa 비활성화
 
     else:
         # ══ 미국·일본: 기존 Tavily + Exa 사용 ═══════════════════════════════
@@ -745,7 +950,8 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
         sr = search_tavily_sns(qs["exa_sns"], market_id=market_id)
         qr = collect_quant_evidence(qs["quant"], entity_info=entity, market_id=market_id, target=target, ticker_raw=ticker_raw)
         et = fetch_earnings_transcript(ticker_raw, target_name=target, market_id=market_id) if ticker_raw else "[지수 — 어닝콜 해당 없음]"
-        fs = fetch_fmp_financial_snapshot(ticker_raw, market_id=market_id) if ticker_raw else None
+        # ⑦ 통합 정량 스냅샷: Yahoo + FMP(미국) + FRED 거시
+        fs = fetch_quant_data_unified(ticker_raw, market_id=market_id) if ticker_raw else None
         tr_global = search_tavily(qs["tavily_global"]) if qs.get("tavily_global") else []
         er_global = (
             search_exa_reports(qs["exa_global"], entity_info=entity, recent_days=120, market_id="sp500")
@@ -856,7 +1062,7 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
             fmt(sr,  "③ SNS·커뮤니티 반응", show_p=True),
             f"【④ 어닝콜·실적발표】\n{et}",
             fmt_quant(qr, "⑤ 정량 근거"),
-            f"{fs}" if fs else "【⑥ FMP 정량 스냅샷】\n가용 데이터 없음\n",
+            f"{fs}" if fs else "【⑥ 통합 정량 스냅샷 (Yahoo + FMP + FRED)】\n가용 데이터 없음 — yfinance 패키지 또는 API 키 확인 필요\n",
         ]
         if tr_global or er_global:
             sections.append(fmt(tr_global, "⑦ 해외 시각 — Tavily"))
