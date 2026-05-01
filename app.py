@@ -868,9 +868,13 @@ def combined_search(target, direction, market_index, sector="", ticker_raw="", m
 # ─── LLM 호출 ─────────────────────────────────────────────────────────────────
 _BG_KEYS: dict = {}
 
-def call_llm(system, user_content, max_tokens=4000, market_id="sp500"):
+def call_llm(system, user_content, max_tokens=4000, market_id="sp500", model_override=""):
+    """
+    LLM 호출. model_override가 지정되면 해당 모델을 직접 사용 (예: TradingAgents → deepseek-r1:32b).
+    그 외에는 시장별 기본 모델 사용.
+    """
     ollama_url = get_ollama_url()
-    model = get_ollama_model(market_id)
+    model = model_override if model_override else get_ollama_model(market_id)
     ollama_error_msg = ""
     try:
         # qwen은 중국어 모델 — 사용자 메시지에도 한국어 강제 prefix 추가
@@ -879,12 +883,23 @@ def call_llm(system, user_content, max_tokens=4000, market_id="sp500"):
             + user_content
         ) if "qwen" in model.lower() else user_content
 
-        payload = {"model":model,"messages":[{"role":"system","content":system},{"role":"user","content":user_with_lang}],"stream":False,"options":{"num_predict":max_tokens,"temperature":0.6}}
+        # DeepSeek-R1은 추론 모델이라 토큰을 더 많이 필요로 함 (사고 과정 포함)
+        actual_max_tokens = max_tokens
+        if "deepseek-r1" in model.lower():
+            actual_max_tokens = max(max_tokens, 6000)  # 최소 6000 토큰 보장
+
+        payload = {"model":model,"messages":[{"role":"system","content":system},{"role":"user","content":user_with_lang}],"stream":False,"options":{"num_predict":actual_max_tokens,"temperature":0.6}}
         headers = {"ngrok-skip-browser-warning":"true","Content-Type":"application/json"}
-        resp = requests.post(f"{ollama_url}/api/chat", json=payload, headers=headers, timeout=300)
+        resp = requests.post(f"{ollama_url}/api/chat", json=payload, headers=headers, timeout=600 if "deepseek-r1" in model.lower() else 300)
         if resp.status_code != 200: raise Exception(f"HTTP {resp.status_code}: {resp.text}")
         resp.raise_for_status()
-        return resp.json()["message"]["content"]
+        content = resp.json()["message"]["content"]
+
+        # DeepSeek-R1 출력에서 <think>...</think> 블록 제거 (추론 과정은 사용자에게 노출 안 함)
+        if "deepseek-r1" in model.lower() and "<think>" in content:
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+        return content
     except Exception as e:
         ollama_error_msg = str(e)
         print(f"[Ollama 실패: {ollama_error_msg}] → Anthropic fallback")
@@ -1192,17 +1207,23 @@ def build_system_prompts(market, stock=None):
 ## 수석 내러티브 판정관
 
 ### 판정 철학
-세 개의 독립 내러티브(각자 타깃 검색 기반)를 비교 평가합니다.
-핵심 질문: **"향후 3개월간 어떤 집단 믿음이 가장 강하게 확산될 것인가?"**
+**4개의 독립적 분석**을 종합 평가합니다:
+  ① 강세 내러티브 (시장 참여자의 강세 집단 믿음)
+  ② 중립 내러티브 (시장 참여자의 균형 집단 믿음)
+  ③ 약세 내러티브 (시장 참여자의 약세 집단 불신)
+  ④ 트레이딩 데스크 의견 (펀더멘털+뉴스+심리 종합 → 트레이더 BUY/HOLD/SELL)
 
-- Priced-In 내러티브 → 현재 주가에 이미 반영, 추가 alpha 없음
+핵심 질문: **"향후 3개월간 어떤 방향이 가장 설득력 있고, 내러티브와 데스크 view가 일치하는가?"**
+
+- Priced-In → 현재 주가에 이미 반영, 추가 alpha 없음
 - Not Yet Priced-In → 주가를 움직임, 판정의 핵심
+- **트레이딩 데스크 view와 내러티브 view의 일치 여부 → 신뢰도의 핵심 지표**
 
 ⚠️ 금지: Priced-In 요인을 판정 주근거로 삼지 말 것 / 목표가 중심 판정 금지 / {cutoff_str_ko} 이전 자료 금지
 
 ## 핵심 요약
 [4문장:
- 1. 향후 3개월 가장 강하게 확산될 집단 믿음
+ 1. 향후 3개월 가장 강하게 확산될 집단 믿음 + 트레이딩 데스크 view 일치 여부
  2. 그 믿음의 인과 사슬 (A→B→C→주가 방향)
  3. 경쟁 내러티브의 결정적 약점
  4. 이 판정을 뒤집을 역(逆)내러티브]
@@ -1210,6 +1231,11 @@ def build_system_prompts(market, stock=None):
 ## ⚡ 최종 판정
 
 ### 가장 그럴듯한 내러티브: [강세 / 중립 / 약세]
+
+### 트레이딩 데스크 일치도
+- 트레이더 결정: [BUY / HOLD / SELL] (데스크 의견 ④ 인용)
+- 내러티브 판정과의 일치도: [완전 일치 / 부분 일치 / 충돌]
+- 충돌 시 어느 쪽이 더 설득력 있는가: [내러티브 우선 / 데스크 우선 / 양쪽 절충]
 
 ### 세 내러티브 비교 평가
 | 항목 | 강세 | 중립 | 약세 |
@@ -1221,6 +1247,7 @@ def build_system_prompts(market, stock=None):
 | 집단 확산 속도 | 빠름/중간/느림 | - | - |
 | 지속가능성 | /10 | /10 | /10 |
 | 붕괴/해소 확률 | 높음/중간/낮음 | - | - |
+| 데스크 일치도 | 높음/중간/낮음 | - | - |
 
 ### 지배적 집단 믿음 (한 문장)
 [향후 3개월 시장이 가장 강하게 공유할 경제적 믿음]
@@ -1424,6 +1451,185 @@ def _fetch_price_action_context(target: str, ticker_raw: str, market_id: str) ->
     return header + "\n\n".join(snippets[:8])
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# TRADING AGENTS DESK — TradingAgents 프레임워크 구조를 차용한 멀티 에이전트 데스크
+# ──────────────────────────────────────────────────────────────────────────────
+# 구조:
+#   ① 펀더멘털 애널리스트 — 재무·밸류에이션·수익성 분석
+#   ② 뉴스 애널리스트 — 거시·이벤트·정책 분석
+#   ③ 감성 애널리스트 — SNS·종토방·시장 심리 분석
+#       ↓ (3개 보고서)
+#   ④ 리서치 매니저 — 충돌 해소 + 종합 리서치 의견
+#       ↓
+#   ⑤ 트레이더 — BUY/HOLD/SELL + 신뢰도 + 리스크
+#
+# 모델: DeepSeek-R1:32b (추론 강함, 토론형 분석에 적합)
+# 출력: Phase 2 Judge에 "제4의 의견 (트레이딩 데스크)"으로 전달
+# ──────────────────────────────────────────────────────────────────────────────
+
+TRADING_AGENTS_MODEL = "deepseek-r1:32b"
+
+def _ta_fundamental_analyst(target_label: str, market_id: str, fundamentals_data: str) -> str:
+    """펀더멘털 애널리스트: 재무·밸류에이션·수익성 평가"""
+    system = (
+        "당신은 트레이딩 데스크의 시니어 펀더멘털 애널리스트입니다. "
+        "기업 재무·밸류에이션·수익성·재무건전성을 정량적으로 분석합니다. "
+        "결론은 반드시 한국어로만 작성하십시오. 중국어·영어 출력 금지."
+    )
+    user = (
+        f"분석 대상: {target_label}\n\n"
+        f"【재무·정량 데이터】\n{fundamentals_data}\n\n"
+        f"## 펀더멘털 분석 보고서\n"
+        f"### ① 밸류에이션 평가\n[PER·PBR·EV/EBITDA 등 동종업계 대비 평가]\n\n"
+        f"### ② 수익성 추이\n[매출·영업이익·마진율 트렌드 + YoY/QoQ]\n\n"
+        f"### ③ 재무건전성\n[부채비율·현금흐름·유동성·배당]\n\n"
+        f"### ④ 성장 동력 vs 우려 요인\n[향후 12개월 펀더멘털 관점]\n\n"
+        f"### ⑤ 펀더멘털 점수 [1-10] 및 결론\n"
+        f"[점수와 함께 한 문장 결론. 예: 7/10 — 밸류에이션 매력적이나 마진 압박 우려]"
+    )
+    return call_llm(system, user, max_tokens=3000, market_id=market_id, model_override=TRADING_AGENTS_MODEL)
+
+
+def _ta_news_analyst(target_label: str, market_id: str, news_data: str) -> str:
+    """뉴스 애널리스트: 거시·이벤트·정책 임팩트"""
+    system = (
+        "당신은 트레이딩 데스크의 시니어 뉴스·매크로 애널리스트입니다. "
+        "최신 뉴스·거시 환경·정책·이벤트가 종목에 미치는 영향을 분석합니다. "
+        "결론은 반드시 한국어로만 작성하십시오."
+    )
+    user = (
+        f"분석 대상: {target_label}\n\n"
+        f"【뉴스·이벤트 자료】\n{news_data}\n\n"
+        f"⚠️ 동일 사안 상반 보도 시 최신 날짜 우선 채택, 구보도 폐기.\n\n"
+        f"## 뉴스·매크로 분석 보고서\n"
+        f"### ① 핵심 최신 이벤트 (지난 30일)\n[가장 임팩트 큰 3개 이벤트와 주가 영향]\n\n"
+        f"### ② 거시 환경 영향\n[금리·환율·정책·산업 동향이 이 종목에 미치는 영향]\n\n"
+        f"### ③ 향후 3개월 예정 이벤트\n[실적 발표·정책 결정·산업 이벤트]\n\n"
+        f"### ④ 뉴스 모멘텀 점수 [1-10]\n[1=매우 부정적 / 5=중립 / 10=매우 긍정적]\n\n"
+        f"### ⑤ 한 문장 결론"
+    )
+    return call_llm(system, user, max_tokens=3000, market_id=market_id, model_override=TRADING_AGENTS_MODEL)
+
+
+def _ta_sentiment_analyst(target_label: str, market_id: str, sentiment_data: str) -> str:
+    """감성 애널리스트: SNS·종토방·시장 심리"""
+    system = (
+        "당신은 트레이딩 데스크의 시니어 감성·심리 애널리스트입니다. "
+        "SNS·커뮤니티·어닝콜 톤·기관 수급 등 시장 심리를 분석합니다. "
+        "결론은 반드시 한국어로만 작성하십시오."
+    )
+    user = (
+        f"분석 대상: {target_label}\n\n"
+        f"【SNS·심리 자료】\n{sentiment_data}\n\n"
+        f"## 시장 심리 분석 보고서\n"
+        f"### ① 개인 투자자 심리 (종토방·Reddit 등)\n[강세/중립/약세 비율 + 톤]\n\n"
+        f"### ② 기관 포지셔닝\n[외국인·기관 수급 동향 + 공매도 잔고 변화]\n\n"
+        f"### ③ 어닝콜·경영진 톤\n[자신감 vs 방어적 태도]\n\n"
+        f"### ④ 콘트래리언 신호\n[과도한 낙관/비관 시 반대 매매 신호]\n\n"
+        f"### ⑤ 심리 점수 [1-10] 및 결론\n[1=극단 비관 / 5=중립 / 10=극단 낙관]"
+    )
+    return call_llm(system, user, max_tokens=2500, market_id=market_id, model_override=TRADING_AGENTS_MODEL)
+
+
+def _ta_research_manager(target_label: str, market_id: str,
+                          fundamental_report: str, news_report: str, sentiment_report: str) -> str:
+    """리서치 매니저: 3개 애널리스트 의견 종합 + 충돌 해소"""
+    system = (
+        "당신은 트레이딩 데스크의 리서치 매니저입니다. "
+        "펀더멘털·뉴스·감성 애널리스트의 보고서를 종합하고 충돌을 해소하여 "
+        "데스크 차원의 통합 리서치 결론을 도출합니다. "
+        "결론은 반드시 한국어로만 작성하십시오."
+    )
+    user = (
+        f"분석 대상: {target_label}\n\n"
+        f"=== 펀더멘털 애널리스트 보고서 ===\n{fundamental_report}\n\n"
+        f"=== 뉴스·매크로 애널리스트 보고서 ===\n{news_report}\n\n"
+        f"=== 감성·심리 애널리스트 보고서 ===\n{sentiment_report}\n\n"
+        f"## 리서치 매니저 종합 의견\n"
+        f"### ① 세 보고서의 일치 vs 충돌 지점\n"
+        f"[펀더멘털·뉴스·감성이 서로 일치하는가, 충돌하는가]\n\n"
+        f"### ② 충돌 해소\n[충돌 시 어느 관점이 더 설득력 있는가, 그 이유]\n\n"
+        f"### ③ 통합 리서치 의견\n"
+        f"[펀더멘털 + 뉴스 + 감성을 종합한 단일 view]\n\n"
+        f"### ④ 핵심 리스크 요인 (Top 3)\n[1. ... 2. ... 3. ...]\n\n"
+        f"### ⑤ 핵심 기회 요인 (Top 3)\n[1. ... 2. ... 3. ...]\n\n"
+        f"### ⑥ 종합 점수 [1-10] 및 한 문장 결론"
+    )
+    return call_llm(system, user, max_tokens=3500, market_id=market_id, model_override=TRADING_AGENTS_MODEL)
+
+
+def _ta_trader(target_label: str, market_id: str, research_summary: str) -> str:
+    """트레이더 / 포트폴리오 매니저: 최종 BUY/HOLD/SELL + 신뢰도"""
+    system = (
+        "당신은 트레이딩 데스크의 포트폴리오 매니저(트레이더)입니다. "
+        "리서치 매니저의 통합 의견을 받아 실제 매매 결정을 내립니다. "
+        "위험·보상 비율(risk/reward)을 평가하고 명확한 액션을 제시합니다. "
+        "결론은 반드시 한국어로만 작성하십시오."
+    )
+    user = (
+        f"분석 대상: {target_label}\n\n"
+        f"=== 리서치 매니저 통합 의견 ===\n{research_summary}\n\n"
+        f"## 트레이더 최종 결정\n"
+        f"### ① 매매 결정: [BUY / HOLD / SELL]\n\n"
+        f"### ② 결정 신뢰도: [높음 / 중간 / 낮음]\n\n"
+        f"### ③ 결정 근거 (3-5줄)\n[왜 이 결정을 내렸는가. 가장 결정적인 근거 중심.]\n\n"
+        f"### ④ Risk/Reward 평가\n"
+        f"- 상방 시나리오: [예상 상승률 + 발생 확률]\n"
+        f"- 하방 시나리오: [예상 하락률 + 발생 확률]\n"
+        f"- Risk/Reward 비율 평가\n\n"
+        f"### ⑤ 모니터링 포인트 (실현 트리거)\n[향후 3개월 주시할 핵심 이벤트 2-3개]\n\n"
+        f"### ⑥ 한 줄 트레이딩 노트\n[데스크 동료에게 설명한다면 한 줄로]"
+    )
+    return call_llm(system, user, max_tokens=2500, market_id=market_id, model_override=TRADING_AGENTS_MODEL)
+
+
+def run_trading_agents_desk(target_label: str, market_id: str, all_data: str,
+                             progress_callback=None) -> dict:
+    """
+    트레이딩 데스크 전체 실행: 5개 에이전트 순차 호출 → 통합 결과 반환.
+    
+    Args:
+        target_label: 종목명 (표시용)
+        market_id: 시장 ID
+        all_data: combined_search 결과 (전체 자료)
+        progress_callback: (pct, msg) 진행률 콜백 (선택)
+    
+    Returns:
+        {
+            "fundamental": 펀더멘털 보고서,
+            "news": 뉴스 보고서,
+            "sentiment": 감성 보고서,
+            "research_manager": 종합 의견,
+            "trader": 트레이더 결정 (이것이 "데스크 의견")
+        }
+    """
+    desk = {}
+
+    # ── ① 펀더멘털 애널리스트 ─────────────────────────────────────────────
+    if progress_callback: progress_callback(0.10, "💼 펀더멘털 애널리스트 분석 중...")
+    desk["fundamental"] = _ta_fundamental_analyst(target_label, market_id, all_data)
+
+    # ── ② 뉴스 애널리스트 ─────────────────────────────────────────────────
+    if progress_callback: progress_callback(0.30, "📰 뉴스·매크로 애널리스트 분석 중...")
+    desk["news"] = _ta_news_analyst(target_label, market_id, all_data)
+
+    # ── ③ 감성 애널리스트 ─────────────────────────────────────────────────
+    if progress_callback: progress_callback(0.50, "🎭 시장 심리 애널리스트 분석 중...")
+    desk["sentiment"] = _ta_sentiment_analyst(target_label, market_id, all_data)
+
+    # ── ④ 리서치 매니저 ───────────────────────────────────────────────────
+    if progress_callback: progress_callback(0.70, "📊 리서치 매니저 종합 중...")
+    desk["research_manager"] = _ta_research_manager(
+        target_label, market_id, desk["fundamental"], desk["news"], desk["sentiment"]
+    )
+
+    # ── ⑤ 트레이더 / 포트폴리오 매니저 ────────────────────────────────────
+    if progress_callback: progress_callback(0.90, "💰 트레이더 최종 결정 중...")
+    desk["trader"] = _ta_trader(target_label, market_id, desk["research_manager"])
+
+    return desk
+
+
 # ─── CORE ANALYSIS ────────────────────────────────────────────────────────────
 def _run_analysis_core(target_id, target_label, market, stock, prompts):
     """
@@ -1445,10 +1651,13 @@ def _run_analysis_core(target_id, target_label, market, stock, prompts):
 
     # ── Phase 1: 방향별 독립 타깃 검색 → 내러티브 추출 ──────────────────────
     direction_map = [
-        ("bull",    "강세", 0.12),
-        ("neutral", "중립", 0.38),
-        ("bear",    "약세", 0.62),
+        ("bull",    "강세", 0.10),
+        ("neutral", "중립", 0.25),
+        ("bear",    "약세", 0.40),
     ]
+
+    # 모든 방향의 검색 결과를 누적 (TradingAgents 데스크에 통합 자료로 전달)
+    all_search_data = []
 
     for agent, dir_label, pct in direction_map:
         update_progress(target_id, pct, f"🔍 {dir_label} 방향 타깃 검색 + 내러티브 구성 중...")
@@ -1458,7 +1667,9 @@ def _run_analysis_core(target_id, target_label, market, stock, prompts):
                 target_short, agent, market["index"],
                 sector=sector, ticker_raw=ticker_raw, market_id=market["id"]
             )
-            update_progress(target_id, pct + 0.10,
+            all_search_data.append(f"=== [{dir_label}] 방향 자료 ===\n{targeted_data}")
+
+            update_progress(target_id, pct + 0.05,
                             f"🤖 {AGENT_LABELS[agent]} — 내러티브 발굴 중...")
 
             uc = (
@@ -1485,22 +1696,66 @@ def _run_analysis_core(target_id, target_label, market, stock, prompts):
         except Exception as e:
             results[agent] = f"⚠️ 오류: {e}"
 
-    # ── Phase 2: Judge — 세 내러티브 비교 판정 ───────────────────────────────
-    update_progress(target_id, 0.88, "📡 현재 주가 조회 + 최종 판정 중...")
+    # ──────────────────────────────────────────────────────────────────────────
+    # Phase 1.5: TradingAgents 트레이딩 데스크 (제4의 의견)
+    # 5개 에이전트(펀더멘털·뉴스·감성 → 리서치 매니저 → 트레이더) 순차 실행.
+    # DeepSeek-R1:32b 사용. 결과는 results["trading_desk"]에 저장하여
+    # Phase 2 Judge에 4번째 입력으로 전달.
+    # ──────────────────────────────────────────────────────────────────────────
+    update_progress(target_id, 0.55, "💼 TradingAgents 데스크 — 5개 에이전트 가동 중...")
+    try:
+        # 모든 방향 자료를 합쳐서 데스크에 전달 (편향 없는 종합 분석)
+        combined_data_for_desk = "\n\n".join(all_search_data)
+
+        def _desk_progress(local_pct, msg):
+            # Phase 1.5 진행률: 0.55 ~ 0.78 구간에 매핑
+            global_pct = 0.55 + local_pct * 0.23
+            update_progress(target_id, global_pct, msg)
+
+        desk = run_trading_agents_desk(
+            target_label=target_label,
+            market_id=market["id"],
+            all_data=combined_data_for_desk,
+            progress_callback=_desk_progress,
+        )
+        # 각 에이전트 결과를 한국어 클린업
+        results["trading_desk"] = {
+            k: strip_duplicate_translation(v, market_id=market["id"])
+            for k, v in desk.items()
+        }
+    except Exception as e:
+        results["trading_desk"] = {"trader": f"⚠️ 트레이딩 데스크 오류: {e}"}
+
+    # ── Phase 2: Judge — 세 내러티브 + 데스크 의견 종합 판정 ─────────────────
+    update_progress(target_id, 0.85, "📡 현재 주가 조회 + 최종 판정 중...")
     try:
         price_ctx = fetch_current_price(target_short, ticker_raw, market["id"])
+        desk_view = results.get("trading_desk", {}) or {}
         judge_input = (
             f"【실시간 현재가 — 참고 정보】\n{price_ctx}\n\n"
             f"{'='*60}\n\n"
-            f"아래는 각 방향별 타깃 검색을 통해 독립적으로 발굴된 세 개의 내러티브입니다.\n"
-            f"각 내러티브는 Priced-In(이미 반영)과 Not Yet Priced-In(미반영)을 자체적으로 구분하고 있습니다.\n\n"
+            f"아래는 4개의 독립적 분석 결과입니다:\n"
+            f"  ① 강세 내러티브 (집단 믿음 관점)\n"
+            f"  ② 중립 내러티브 (집단 믿음 관점)\n"
+            f"  ③ 약세 내러티브 (집단 믿음 관점)\n"
+            f"  ④ TradingAgents 데스크 의견 (펀더멘털+뉴스+심리 종합 → 트레이더 결정)\n\n"
+            f"4개 의견을 비교 평가하여 최종 판정을 내리십시오.\n\n"
             + "\n\n".join(
                 f"{'='*40}\n[{AGENT_LABELS[a]}]:\n{results.get(a, '')}"
                 for a in ["bull", "neutral", "bear"]
             )
+            + f"\n\n{'='*40}\n[💼 트레이딩 데스크 — 리서치 매니저 종합 의견]:\n"
+            + (desk_view.get("research_manager", "") or "데스크 의견 없음")
+            + f"\n\n{'='*40}\n[💰 트레이딩 데스크 — 트레이더 최종 결정]:\n"
+            + (desk_view.get("trader", "") or "트레이더 결정 없음")
             + f"\n\n{'='*60}\n\n"
-            f"세 내러티브를 비교 평가하여 최종 판정을 내리십시오.\n"
-            f"판단의 핵심: 어느 방향의 'Not Yet Priced-In' 내러티브가 가장 설득력 있고 실현 가능성이 높은가?"
+            f"## 최종 판정 시 고려사항\n"
+            f"1. 세 내러티브(①②③) → 시장 참여자의 집단 믿음 관점 (Not Yet Priced-In 중심)\n"
+            f"2. 트레이딩 데스크(④) → 펀더멘털·뉴스·심리 종합 정량적 view + 매매 결정\n"
+            f"3. 두 관점이 일치하면 → 판정 신뢰도 높음\n"
+            f"4. 두 관점이 충돌하면 → 충돌 이유 분석 후 어느 쪽이 더 설득력 있는지 결정\n"
+            f"5. 판정의 핵심: 어느 방향의 'Not Yet Priced-In' 내러티브가 가장 설득력 있고 "
+            f"   트레이딩 데스크의 정량 분석으로도 뒷받침되는가?"
         )
         results["judge"] = strip_duplicate_translation(
             call_llm(prompts["judge"], judge_input, max_tokens=8000, market_id=market["id"]),
@@ -1694,11 +1949,43 @@ border:2px solid {w_color};border-radius:16px;padding:22px 28px;margin:4px 0 20p
         else:
             st.markdown(trigger_text)
 
-    # ══ 5. 상세 내러티브 탭 ══════════════════════════════════════════════════
+    # ══ 5. 트레이딩 데스크 의견 (제4의 의견) ════════════════════════════════
+    desk = results.get("trading_desk", {}) or {}
+    if desk.get("trader"):
+        trader_text = desk.get("trader", "")
+        # BUY/HOLD/SELL 자동 추출
+        decision_match = re.search(r"매매 결정[:\s\*]*\[?([A-Z]+)\]?", trader_text)
+        decision = decision_match.group(1) if decision_match else ""
+        decision_color = {
+            "BUY":  ("#00e87a", "#e6fff4", "🟢"),
+            "HOLD": ("#f5c518", "#fffde6", "🟡"),
+            "SELL": ("#ff3c4e", "#fff0f2", "🔴"),
+        }.get(decision, ("#6b7a9e", "#f8f9fc", "⚪"))
+        d_color, d_bg, d_emoji = decision_color
+
+        st.markdown("")
+        st.markdown("**💼 트레이딩 데스크 의견 (제4의 의견)**")
+        st.caption("DeepSeek-R1:32b 기반 5개 에이전트 (펀더멘털·뉴스·심리 → 리서치 매니저 → 트레이더)")
+
+        if decision:
+            st.markdown(
+                f"<div style='background:linear-gradient(135deg,{d_color}28,{d_bg});"
+                f"border:2px solid {d_color};border-radius:12px;padding:16px 20px;margin:8px 0'>"
+                f"<div style='display:flex;align-items:center;gap:16px'>"
+                f"<div style='font-size:32px'>{d_emoji}</div>"
+                f"<div>"
+                f"<div style='color:#6b7a9e;font-size:11px;letter-spacing:2px'>트레이더 최종 결정</div>"
+                f"<div style='color:{d_color};font-size:28px;font-weight:900'>{decision}</div>"
+                f"</div></div></div>",
+                unsafe_allow_html=True
+            )
+
+    # ══ 6. 상세 내러티브 탭 (트레이딩 데스크 포함) ══════════════════════════
     st.markdown("---")
-    st.markdown("**📖 상세 내러티브 보기**")
-    tab_bull, tab_neutral, tab_bear, tab_judge = st.tabs(
-        ["📈 강세 내러티브", "➡️ 중립 내러티브", "📉 약세 내러티브", "📋 최종 판정 전문"]
+    st.markdown("**📖 상세 분석 보기**")
+    tab_bull, tab_neutral, tab_bear, tab_desk, tab_judge = st.tabs(
+        ["📈 강세 내러티브", "➡️ 중립 내러티브", "📉 약세 내러티브",
+         "💼 트레이딩 데스크", "📋 최종 판정 전문"]
     )
     with tab_bull:
         st.markdown(results.get("bull") or "결과 없음")
@@ -1706,6 +1993,18 @@ border:2px solid {w_color};border-radius:16px;padding:22px 28px;margin:4px 0 20p
         st.markdown(results.get("neutral") or "결과 없음")
     with tab_bear:
         st.markdown(results.get("bear") or "결과 없음")
+    with tab_desk:
+        if desk:
+            sub_t1, sub_t2, sub_t3, sub_t4, sub_t5 = st.tabs(
+                ["💰 트레이더 결정", "📊 리서치 매니저", "💼 펀더멘털", "📰 뉴스·매크로", "🎭 시장 심리"]
+            )
+            with sub_t1: st.markdown(desk.get("trader") or "결과 없음")
+            with sub_t2: st.markdown(desk.get("research_manager") or "결과 없음")
+            with sub_t3: st.markdown(desk.get("fundamental") or "결과 없음")
+            with sub_t4: st.markdown(desk.get("news") or "결과 없음")
+            with sub_t5: st.markdown(desk.get("sentiment") or "결과 없음")
+        else:
+            st.info("이 종목은 트레이딩 데스크 분석이 없습니다 (이전 버전 캐시).")
     with tab_judge:
         st.markdown(judge_text or "결과 없음")
 
@@ -1839,7 +2138,7 @@ def main():
         qw=get_ollama_model('kospi200'); ll=get_ollama_model('sp500'); gm=get_ollama_model('nikkei225')
         st.markdown(f"""<h1 style='background:linear-gradient(90deg,#4fc3f7,#00e87a,#f5c518,#ff3c4e,#e040fb);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-size:26px;margin:0'>
         ⚡ [시장/종목] 내러티브 앤 넘버스 수집 및 분석</h1>
-        <p style='color:#4a5568;font-size:11px;letter-spacing:2px;margin:2px 0 0'>7-AGENT AI · 향후 3개월 판정 · 🇰🇷{qw} / 🇺🇸{ll} / 🇯🇵{gm}</p>""",unsafe_allow_html=True)
+        <p style='color:#4a5568;font-size:11px;letter-spacing:2px;margin:2px 0 0'>3내러티브 + 트레이딩 데스크 + Judge · 향후 3개월 판정 · 🇰🇷{qw} / 🇺🇸{ll} / 🇯🇵{gm} + Desk: deepseek-r1:32b</p>""",unsafe_allow_html=True)
     with col_info:
         ollama_url=get_ollama_url()
         st.markdown(f"<div style='color:#374151;font-size:10px;text-align:right;margin-top:8px'>🖥 {ollama_url[:30]}...</div>",unsafe_allow_html=True)
